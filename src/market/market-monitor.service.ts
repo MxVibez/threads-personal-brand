@@ -223,7 +223,10 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
        WHERE mp.first_seen_at >= $1
          AND mp.notified_at IS NULL
          AND mp.excluded_reason IS NULL
-         AND mp.opportunity_score >= 50
+         AND (
+           (mp.source_market = 'international' AND mp.opportunity_score >= 30)
+           OR (mp.source_market = 'russian' AND mp.opportunity_score >= 50)
+         )
        ORDER BY (mp.source_market = 'international') DESC,
                 (COALESCE(s.author_count, '1')::int >= 3) DESC,
                 mp.opportunity_score DESC,
