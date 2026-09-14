@@ -35,12 +35,12 @@ upsert_env() {
   mv "$threads_tmp" "$env_file"
 }
 
-upsert_env APIFY_ACTOR_ID sourabhbgp/threads-scraper
+upsert_env APIFY_ACTOR_ID logical_scrapers/threads-search-scraper
 upsert_env APIFY_MARKET_ENABLED true
-upsert_env APIFY_DAILY_MAX_RESULTS 100
+upsert_env APIFY_DAILY_MAX_RESULTS 50
 upsert_env APIFY_TEST_RUN_LIMIT 9
-upsert_env APIFY_MAX_CHARGE_USD 0.5
+upsert_env APIFY_MAX_CHARGE_USD 0.2
 chmod 600 "$env_file"
 
 echo 'Ежедневный мониторинг рынка включён в тестовом режиме.'
-echo 'Лимит: 100 результатов, до $0.50 за запуск, не более 9 автоматических запусков.'
+echo 'Лимит: 50 результатов, жёсткий предел $0.20 за запуск.'

@@ -2,18 +2,35 @@ import { Inject, Injectable, Logger, type OnApplicationShutdown, type OnModuleIn
 import { ConfigService } from "@nestjs/config";
 import type { Pool, PoolClient } from "pg";
 import { DATABASE_POOL } from "../infrastructure/database/database.tokens";
+import { scoreTopicCandidate } from "./topic-relevance";
 
 const SEARCH_TERMS = [
-  "Telegram Mini App",
-  "приложение для бизнеса",
-  "автоматизация продаж",
-  "сервис для эксперта",
-  "мобильное приложение бизнес",
-  "AI аватар",
-  "ИИ аватар",
-  "AI блогер",
-  "ИИ блогер",
-  "контент для бренда"
+  "приложение",
+  "бренд",
+  "маркетинг",
+  "продажи",
+  "AI startups",
+  "small business",
+  "content creator",
+  "sales funnel",
+  "customer experience",
+  "founder mistakes",
+  "business automation",
+  "AI avatar",
+  "personal brand"
+];
+
+const APIFY_SEARCH_TERMS = [
+  "AI startups",
+  "small business",
+  "creator economy",
+  "customer experience",
+  "founder mistakes",
+  "business automation",
+  "AI avatar",
+  "personal brand",
+  "приложение",
+  "бренд"
 ];
 
 const APIFY_REQUEST_TIMEOUT_MS = 20_000;
@@ -64,8 +81,10 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
       const threadsToken = this.config.get<string>("THREADS_ACCESS_TOKEN", "");
       const token = this.config.get<string>("APIFY_API_TOKEN", "");
       const actor = this.config.get<string>("APIFY_ACTOR_ID", "");
-      if (threadsEnabled && !threadsToken) return;
-      if (!threadsEnabled && (!token || !actor)) return;
+      const apifyEnabled = this.config.get<string>("APIFY_MARKET_ENABLED", "false") === "true";
+      const threadsConfigured = threadsEnabled && Boolean(threadsToken);
+      const apifyConfigured = apifyEnabled && Boolean(token) && Boolean(actor);
+      if (!threadsConfigured && !apifyConfigured) return;
 
       const reserved = await this.pool.query<{ id: string }>(
         `INSERT INTO market_monitor_runs (run_date, status)
@@ -79,45 +98,45 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
       runRecordId = reserved.rows[0]?.id ?? null;
       if (!runRecordId) return;
 
-      if (threadsEnabled) {
+      const items: MarketItem[] = [];
+      await this.pool.query(
+        "UPDATE market_monitor_runs SET status = 'RUNNING' WHERE id = $1",
+        [runRecordId]
+      );
+
+      if (threadsConfigured) {
         const maxResults = this.config.get<number>("THREADS_MARKET_SEARCH_LIMIT", 10);
-        await this.pool.query(
-          "UPDATE market_monitor_runs SET status = 'RUNNING' WHERE id = $1",
-          [runRecordId]
-        );
-        const items = await this.loadThreadsSearch(threadsToken, maxResults);
-        await this.storeItems(items);
-        await this.notifyOwners(startedAt);
-        await this.pool.query(
-          `UPDATE market_monitor_runs
-           SET status = 'SUCCEEDED', item_count = $2, finished_at = NOW(), error = NULL
-           WHERE id = $1`,
-          [runRecordId, items.length]
-        );
-        return;
+        items.push(...await this.loadThreadsSearch(threadsToken, maxResults));
       }
 
-      const maxResults = this.config.get<number>("APIFY_DAILY_MAX_RESULTS", 100);
-      const maxCharge = this.config.get<number>("APIFY_MAX_CHARGE_USD", 0.5);
-      const run = await this.startActor(token, actor, maxResults, maxCharge);
-      await this.pool.query(
-        `UPDATE market_monitor_runs
-         SET apify_run_id = $2, dataset_id = $3, status = 'RUNNING'
-         WHERE id = $1`,
-        [runRecordId, run.id, run.defaultDatasetId ?? null]
-      );
-      const finished = await this.waitForRun(token, run);
-      if (finished.status !== "SUCCEEDED" || !finished.defaultDatasetId) {
-        throw new Error(`Apify run finished with status ${finished.status}`);
+      let datasetId: string | null = null;
+      if (apifyConfigured) {
+        const maxResults = this.config.get<number>("APIFY_DAILY_MAX_RESULTS", 50);
+        const maxCharge = this.config.get<number>("APIFY_MAX_CHARGE_USD", 0.2);
+        const perQueryLimit = Math.max(1, Math.floor(maxResults / APIFY_SEARCH_TERMS.length));
+        const run = await this.startActor(token, actor, perQueryLimit, maxResults, maxCharge);
+        await this.pool.query(
+          `UPDATE market_monitor_runs
+           SET apify_run_id = $2, dataset_id = $3
+           WHERE id = $1`,
+          [runRecordId, run.id, run.defaultDatasetId ?? null]
+        );
+        const finished = await this.waitForRun(token, run);
+        if (finished.status !== "SUCCEEDED" || !finished.defaultDatasetId) {
+          throw new Error(`Apify run finished with status ${finished.status}`);
+        }
+        datasetId = finished.defaultDatasetId;
+        items.push(...await this.loadDataset(token, datasetId, maxResults));
       }
-      const items = await this.loadDataset(token, finished.defaultDatasetId, maxResults);
+
       await this.storeItems(items);
+      await this.notifyOwners(startedAt);
       await this.pool.query(
         `UPDATE market_monitor_runs
          SET status = 'SUCCEEDED', dataset_id = $2, item_count = $3,
              finished_at = NOW(), error = NULL
          WHERE id = $1`,
-        [runRecordId, finished.defaultDatasetId, items.length]
+        [runRecordId, datasetId, items.length]
       );
     } catch (error) {
       if (runRecordId) {
@@ -137,7 +156,7 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   private async loadThreadsSearch(accessToken: string, limit: number): Promise<MarketItem[]> {
     const baseUrl = this.config.get<string>("THREADS_API_BASE_URL", "https://graph.threads.net").replace(/\/$/, "");
     const version = this.config.get<string>("THREADS_API_VERSION", "v1.0");
-    const since = Math.floor((Date.now() - 48 * 60 * 60 * 1_000) / 1_000);
+    const since = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1_000) / 1_000);
     const items: MarketItem[] = [];
     for (const query of SEARCH_TERMS) {
       const params = new URLSearchParams({
@@ -180,11 +199,37 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
       text: string;
       post_url: string;
       query: string | null;
+      opportunity_score: number;
+      score_reasons: unknown;
+      suggested_angle: string | null;
+      source_market: string;
+      author_count: string;
+      signal_count: string;
     }>(
-      `SELECT id, username, text, post_url, query
-       FROM market_posts
-       WHERE first_seen_at >= $1 AND notified_at IS NULL
-       ORDER BY posted_at DESC NULLS LAST, first_seen_at DESC
+      `WITH support AS (
+         SELECT query, COUNT(DISTINCT username)::text AS author_count,
+                COUNT(*)::text AS signal_count
+         FROM market_posts
+         WHERE posted_at >= NOW() - INTERVAL '7 days'
+           AND excluded_reason IS NULL
+         GROUP BY query
+       )
+       SELECT mp.id, mp.username, mp.text, mp.post_url, mp.query,
+              mp.opportunity_score, mp.score_reasons, mp.suggested_angle,
+              mp.source_market,
+              COALESCE(s.author_count, '1') AS author_count,
+              COALESCE(s.signal_count, '1') AS signal_count
+       FROM market_posts mp
+       LEFT JOIN support s ON s.query IS NOT DISTINCT FROM mp.query
+       WHERE mp.first_seen_at >= $1
+         AND mp.notified_at IS NULL
+         AND mp.excluded_reason IS NULL
+         AND mp.opportunity_score >= 50
+       ORDER BY (mp.source_market = 'international') DESC,
+                (COALESCE(s.author_count, '1')::int >= 3) DESC,
+                mp.opportunity_score DESC,
+                (mp.like_count + mp.reply_count * 2 + mp.repost_count * 3 + mp.quote_count * 3) DESC,
+                mp.posted_at DESC NULLS LAST
        LIMIT 3`,
       [startedAt]
     );
@@ -193,14 +238,25 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     const miniAppUrl = `${this.config.get<string>("APP_BASE_URL", "").replace(/\/$/, "")}/miniapp/`;
     const lines = candidates.rows.map((item, index) => {
       const excerpt = item.text.length > 280 ? `${item.text.slice(0, 277)}…` : item.text;
-      return `${index + 1}. ${item.query ?? "Новый сигнал"}\n@${item.username}: ${excerpt}\n${item.post_url}`;
+      const reasons = Array.isArray(item.score_reasons)
+        ? item.score_reasons.filter((reason): reason is string => typeof reason === "string").slice(0, 2)
+        : [];
+      return [
+        `${index + 1}. ${item.source_market === "international" ? "Зарубежный радар" : "Русский сигнал"} · ${item.opportunity_score}/100`,
+        `${Number(item.author_count) >= 3 ? "Повторяющийся паттерн" : "Ранняя гипотеза"}: ${item.author_count} авторов, ${item.signal_count} публикаций`,
+        `Тема: ${item.query ?? "Новый сигнал"}`,
+        `@${item.username}: ${excerpt}`,
+        ...(reasons.length > 0 ? [`Почему беру: ${reasons.join("; ")}.`] : []),
+        ...(item.suggested_angle ? [`Ваш заход: ${item.suggested_angle}`] : []),
+        item.post_url
+      ].join("\n");
     });
     const text = [
       "Нашёл темы, которые подходят вам",
       "",
       ...lines,
       "",
-      "Собрал только свежие обсуждения за последние 48 часов. Команда /topics покажет последние найденные сигналы."
+      "Зарубежным сигналам даю приоритет. Один пост считаю гипотезой; повторяющимся паттерном — только тему от трёх независимых авторов. Команда /topics покажет лучший текущий список."
     ].join("\n\n");
 
     for (const chatId of ownerIds) {
@@ -231,12 +287,13 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   private async startActor(
     token: string,
     actor: string,
-    maxResults: number,
+    perQueryLimit: number,
+    totalLimit: number,
     maxCharge: number
   ): Promise<ApifyRun> {
     const actorId = actor.replace("/", "~");
     const query = new URLSearchParams({
-      maxItems: String(maxResults),
+      maxItems: String(totalLimit),
       maxTotalChargeUsd: String(maxCharge)
     });
     const response = await fetch(
@@ -247,7 +304,14 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
           authorization: `Bearer ${token}`,
           "content-type": "application/json"
         },
-        body: JSON.stringify({ urls: SEARCH_TERMS, mode: "search", maxResults }),
+        body: JSON.stringify({
+          searchQueries: APIFY_SEARCH_TERMS,
+          searchType: "all",
+          maxItems: perQueryLimit,
+          includeReplies: false,
+          postedAfter: new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10),
+          proxyConfiguration: { useApifyProxy: true }
+        }),
         signal: AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS)
       }
     );
@@ -339,13 +403,35 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     const username = this.string(item.username ?? (item.author as Record<string, unknown> | undefined)?.username).slice(0, 120);
     const postUrl = this.threadsUrl(item.postUrl ?? item.post_url ?? item.permalink ?? item.url);
     if (!text || !username || !postUrl) return;
+    const likeCount = this.number(item.likeCount ?? item.like_count ?? item.likes);
+    const replyCount = this.number(item.replyCount ?? item.reply_count ?? item.replies);
+    const repostCount = this.number(item.repostCount ?? item.repost_count ?? item.reposts);
+    const quoteCount = this.number(item.quoteCount ?? item.quote_count ?? item.quotes);
+    const viewCount = this.number(item.viewCount ?? item.view_count ?? item.views);
+    const isReply = item.isReply === true || item.is_reply === true;
+    const postedAt = this.date(item.postedAt ?? item.posted_at ?? item.createdAt ?? item.timestamp);
+    const query = this.string(item.query ?? item.searchQuery ?? item.search_keyword).slice(0, 240) || null;
+    const score = scoreTopicCandidate({
+      text,
+      query,
+      likeCount,
+      replyCount,
+      repostCount,
+      quoteCount,
+      viewCount,
+      isReply,
+      postedAt
+    });
     await client.query(
       `INSERT INTO market_posts (
          post_code, post_url, username, query, text,
          like_count, reply_count, repost_count, quote_count,
-         share_count, view_count, is_reply, posted_at, scraped_at, raw
+         share_count, view_count, is_reply, posted_at, scraped_at, raw,
+         relevance_score, reach_score, commercial_score, opportunity_score,
+         score_reasons, suggested_angle, excluded_reason, scored_at, source_market
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb,
+         $16, $17, $18, $19, $20::jsonb, $21, $22, NOW(), $23
        )
        ON CONFLICT (post_url) DO UPDATE SET
          like_count = EXCLUDED.like_count,
@@ -356,23 +442,40 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
          view_count = EXCLUDED.view_count,
          scraped_at = EXCLUDED.scraped_at,
          raw = EXCLUDED.raw,
+         relevance_score = EXCLUDED.relevance_score,
+         reach_score = EXCLUDED.reach_score,
+         commercial_score = EXCLUDED.commercial_score,
+         opportunity_score = EXCLUDED.opportunity_score,
+         score_reasons = EXCLUDED.score_reasons,
+         suggested_angle = EXCLUDED.suggested_angle,
+         excluded_reason = EXCLUDED.excluded_reason,
+         source_market = EXCLUDED.source_market,
+         scored_at = NOW(),
          updated_at = NOW()`,
       [
-        this.string(item.postCode ?? item.post_code ?? item.id).slice(0, 160) || null,
+        this.string(item.postCode ?? item.post_code ?? item.code ?? item.id).slice(0, 160) || null,
         postUrl,
         username,
-        this.string(item.query).slice(0, 240) || null,
+        query,
         text,
-        this.number(item.likeCount ?? item.like_count ?? item.likes),
-        this.number(item.replyCount ?? item.reply_count ?? item.replies),
-        this.number(item.repostCount ?? item.repost_count ?? item.reposts),
-        this.number(item.quoteCount ?? item.quote_count ?? item.quotes),
-        this.number(item.shareCount ?? item.share_count ?? item.shares),
-        this.number(item.viewCount ?? item.view_count ?? item.views),
-        item.isReply === true || item.is_reply === true,
-        this.date(item.postedAt ?? item.posted_at ?? item.timestamp),
+        likeCount,
+        replyCount,
+        repostCount,
+        quoteCount,
+        this.number(item.shareCount ?? item.share_count ?? item.reshareCount ?? item.shares),
+        viewCount,
+        isReply,
+        postedAt,
         this.date(item.scrapedAt ?? item.scraped_at),
-        this.safeRawItem(item)
+        this.safeRawItem(item),
+        score.relevanceScore,
+        score.reachScore,
+        score.commercialScore,
+        score.opportunityScore,
+        JSON.stringify(score.reasons),
+        score.suggestedAngle || null,
+        score.excludedReason ?? null,
+        score.sourceMarket
       ]
     );
   }
@@ -414,7 +517,9 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
 
   private date(value: unknown): Date | null {
     if (typeof value !== "string" && typeof value !== "number") return null;
-    const parsed = new Date(value);
+    const parsed = new Date(typeof value === "number" && Math.abs(value) < 1_000_000_000_000
+      ? value * 1_000
+      : value);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 }

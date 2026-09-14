@@ -109,11 +109,35 @@ export class TelegramBotService implements OnModuleInit {
       post_url: string;
       username: string;
       query: string | null;
+      opportunity_score: number;
+      score_reasons: unknown;
+      suggested_angle: string | null;
+      source_market: string;
+      author_count: string;
+      signal_count: string;
     }>(
-      `SELECT text, post_url, username, query
-       FROM market_posts
-       WHERE posted_at >= NOW() - INTERVAL '7 days'
-       ORDER BY posted_at DESC NULLS LAST, first_seen_at DESC
+      `WITH support AS (
+         SELECT query, COUNT(DISTINCT username)::text AS author_count,
+                COUNT(*)::text AS signal_count
+         FROM market_posts
+         WHERE posted_at >= NOW() - INTERVAL '7 days'
+           AND excluded_reason IS NULL
+         GROUP BY query
+       )
+       SELECT mp.text, mp.post_url, mp.username, mp.query,
+              mp.opportunity_score, mp.score_reasons, mp.suggested_angle,
+              mp.source_market,
+              COALESCE(s.author_count, '1') AS author_count,
+              COALESCE(s.signal_count, '1') AS signal_count
+       FROM market_posts mp
+       LEFT JOIN support s ON s.query IS NOT DISTINCT FROM mp.query
+       WHERE mp.posted_at >= NOW() - INTERVAL '7 days'
+         AND mp.excluded_reason IS NULL
+         AND mp.opportunity_score >= 50
+       ORDER BY (mp.source_market = 'international') DESC,
+                (COALESCE(s.author_count, '1')::int >= 3) DESC,
+                mp.opportunity_score DESC,
+                mp.posted_at DESC NULLS LAST
        LIMIT 5`
     );
     if (result.rows.length === 0) {
@@ -124,8 +148,18 @@ export class TelegramBotService implements OnModuleInit {
     }
     const items = result.rows.map((item, index) => {
       const excerpt = item.text.length > 260 ? `${item.text.slice(0, 257)}…` : item.text;
-      const theme = item.query ? `\nСигнал: ${item.query}` : "";
-      return `${index + 1}. @${item.username}${theme}\n${excerpt}\n${item.post_url}`;
+      const theme = item.query ? ` · ${item.query}` : "";
+      const reasons = Array.isArray(item.score_reasons)
+        ? item.score_reasons.filter((reason): reason is string => typeof reason === "string").slice(0, 2)
+        : [];
+      return [
+        `${index + 1}. ${item.source_market === "international" ? "Зарубежный радар" : "Русский сигнал"} · ${item.opportunity_score}/100${theme}`,
+        `${Number(item.author_count) >= 3 ? "Повторяющийся паттерн" : "Ранняя гипотеза"}: ${item.author_count} авторов, ${item.signal_count} публикаций`,
+        `@${item.username}: ${excerpt}`,
+        ...(reasons.length > 0 ? [`Почему подходит: ${reasons.join("; ")}.`] : []),
+        ...(item.suggested_angle ? [`Заход: ${item.suggested_angle}`] : []),
+        item.post_url
+      ].join("\n");
     });
     await context.reply(["Свежие темы для контента:", "", ...items].join("\n\n"), {
       link_preview_options: { is_disabled: true }
