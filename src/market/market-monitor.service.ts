@@ -70,7 +70,10 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
       const reserved = await this.pool.query<{ id: string }>(
         `INSERT INTO market_monitor_runs (run_date, status)
          VALUES ((NOW() AT TIME ZONE 'Asia/Krasnoyarsk')::date, 'STARTING')
-         ON CONFLICT (run_date) DO NOTHING
+         ON CONFLICT (run_date) DO UPDATE
+         SET status = 'STARTING', started_at = NOW(), finished_at = NULL,
+             item_count = 0, error = NULL
+         WHERE market_monitor_runs.status = 'FAILED'
          RETURNING id`
       );
       runRecordId = reserved.rows[0]?.id ?? null;
