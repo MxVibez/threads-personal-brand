@@ -201,21 +201,6 @@ export class MiniAppController {
     }
   }
 
-  @Post("demo")
-  @HttpCode(200)
-  @Header("Cache-Control", "no-store")
-  async demo(
-    @Headers("authorization") authorization: string | undefined
-  ): Promise<{ draft: ReturnType<MiniAppController["draftDto"]>; existing: boolean }> {
-    const identity = await this.auth.authenticate(authorization);
-    this.assertCanMutateWorkspace(identity);
-    const workspaceTelegramId = this.access.workspaceTelegramId();
-    const waiting = await this.drafts.listWaitingByExpert(workspaceTelegramId, 1);
-    const existing = waiting[0];
-    const draft = existing ?? await this.drafts.createDemo(workspaceTelegramId);
-    return { draft: this.draftDto(draft), existing: Boolean(existing) };
-  }
-
   @Post("drafts/:draftId/approve")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")

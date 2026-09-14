@@ -48,7 +48,7 @@ export interface ResultsResponse {
     detail: string;
     nextStep?: string;
   }>;
-  insights?: ThreadsInsightsDto;
+  insights: ThreadsInsightsDto;
 }
 
 export interface PlannedPublicationDto {
@@ -161,12 +161,6 @@ export function loadBootstrap(
   signal?: AbortSignal
 ): Promise<BootstrapResponse> {
   return request<BootstrapResponse>("/bootstrap", initData, { signal });
-}
-
-export function createDemoDraft(
-  initData: string
-): Promise<{ draft: DraftApiDto; existing: boolean }> {
-  return request("/demo", initData, { method: "POST" });
 }
 
 export function loadResults(initData: string): Promise<ResultsResponse> {

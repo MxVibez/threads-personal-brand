@@ -93,6 +93,8 @@ export class ThreadsResultsService {
     const apifyActorConfigured = Boolean(this.config.get<string>("APIFY_ACTOR_ID", ""));
     const apifyConfigured = apifyTokenConfigured && apifyActorConfigured;
     const marketEnabled = this.config.get<string>("APIFY_MARKET_ENABLED", "false") === "true";
+    const threadsMarketEnabled = this.config.get<string>("THREADS_MARKET_ENABLED", "false") === "true";
+    const officialMarketConfigured = threadsConfigured && threadsMarketEnabled;
     const marketStatus = market.rows[0];
     const marketPosts = Number(marketStatus?.post_count ?? "0");
     const marketAccounts = Number(marketStatus?.account_count ?? "0");
@@ -120,9 +122,21 @@ export class ThreadsResultsService {
         },
         {
           id: "apify",
-          name: "Мониторинг рынка",
-          state: apifyConfigured && marketEnabled && ["RUNNING", "SUCCEEDED"].includes(marketStatus?.last_status ?? "") ? "working" : apifyTokenConfigured ? "test" : "setup",
-          summary: apifyConfigured && marketEnabled
+          name: "Поиск тем в Threads",
+          state: officialMarketConfigured && ["RUNNING", "SUCCEEDED"].includes(marketStatus?.last_status ?? "")
+            ? "working"
+            : officialMarketConfigured
+              ? "test"
+              : apifyConfigured && marketEnabled
+                ? "working"
+                : apifyTokenConfigured
+                  ? "test"
+                  : "setup",
+          summary: officialMarketConfigured
+            ? marketStatus?.last_status === "RUNNING" ? "Идёт поиск свежих тем"
+              : marketStatus?.last_status === "FAILED" ? "Последний поиск завершился ошибкой"
+              : marketStatus?.last_status === "SUCCEEDED" ? "Ежедневный поиск работает" : "Ожидается первый поиск"
+            : apifyConfigured && marketEnabled
             ? marketStatus?.last_status === "RUNNING" ? "Идёт сбор рынка"
               : marketStatus?.last_status === "FAILED" ? "Последний сбор завершился ошибкой"
               : marketStatus?.last_status === "SUCCEEDED" ? "Последний сбор завершён" : "Ожидается первый сбор"
@@ -131,16 +145,20 @@ export class ThreadsResultsService {
             : apifyTokenConfigured
               ? "Apify API подключён"
               : "Apify API ещё не подключён",
-          detail: apifyConfigured && marketEnabled
+          detail: officialMarketConfigured
+            ? `Сохранено ${marketPosts} публикаций от ${marketAccounts} авторов. Бот уведомляет только о новых найденных темах.`
+            : apifyConfigured && marketEnabled
             ? `Сохранено ${marketPosts} публикаций от ${marketAccounts} авторов. Найдено ${marketQuestions} публикаций с вопросами.`
             : apifyConfigured
               ? "API-токен и Actor настроены, но ежедневный сбор выключен."
             : apifyTokenConfigured
               ? "Токен проверен и сохранён. Actor, расписание и сбор данных подключим позже."
               : "Система пока не подключена к Apify и не собирает публичные обсуждения.",
-          ...(!(apifyConfigured && marketEnabled)
+          ...(!(officialMarketConfigured || (apifyConfigured && marketEnabled))
             ? {
-                nextStep: apifyConfigured
+                nextStep: threadsConfigured
+                  ? "Включить поиск тем через Threads API."
+                  : apifyConfigured
                   ? "Включить ежедневный мониторинг."
                   : apifyTokenConfigured
                     ? "Выбрать Actor и настроить источники."
@@ -156,7 +174,7 @@ export class ThreadsResultsService {
             ? dryRun ? "Подключено, но включён тест" : "Threads подключён"
             : "Threads API ещё не подключён",
           detail: dryRun
-            ? "Одобрения сохраняются, но реальные посты не отправляются. Статистика на экране показана как демо."
+            ? "Одобрения сохраняются, но реальные посты не отправляются до контрольной проверки подключения."
             : "Одобренные материалы публикуются через Threads API, статистика аккаунта обновляется отдельно.",
           ...(threadsConfigured
             ? dryRun ? { nextStep: "После контрольного поста выключить dry-run." } : {}

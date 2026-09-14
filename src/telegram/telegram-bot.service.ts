@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import type { Pool } from "pg";
 import { z } from "zod";
 import { DraftAccessDeniedError, DraftNotFoundError, DraftStateError, DraftVersionConflictError } from "../domain/drafts/draft.errors";
 import {
@@ -13,6 +14,7 @@ import {
   type DraftRepository
 } from "../domain/drafts/draft.repository";
 import type { DraftView } from "../domain/drafts/draft.types";
+import { DATABASE_POOL } from "../infrastructure/database/database.tokens";
 
 @Injectable()
 export class TelegramBotService implements OnModuleInit {
@@ -23,6 +25,7 @@ export class TelegramBotService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly approveDraft: ApproveDraftService,
     private readonly access: TelegramAccessService,
+    @Inject(DATABASE_POOL) private readonly pool: Pool,
     @Inject(DRAFT_REPOSITORY) private readonly drafts: DraftRepository
   ) {}
 
@@ -35,11 +38,12 @@ export class TelegramBotService implements OnModuleInit {
       if (context.chat?.type === "private") await next();
     });
     bot.command("start", async (context) => this.handleStart(context));
-    bot.command("demo", async (context) => this.handleDemo(context));
+    bot.command("topics", async (context) => this.handleTopics(context));
     bot.command("admin", async (context) => this.handleAdmin(context));
     bot.on("callback_query:data", async (context) => this.handleCallback(context));
     await bot.init();
     this.bot = bot;
+    await this.configureBotProfile(bot);
     await this.configureBotMenu(bot);
   }
 
@@ -56,13 +60,12 @@ export class TelegramBotService implements OnModuleInit {
       const miniAppUrl = this.miniAppUrl();
       if (!miniAppUrl) {
         await context.reply(
-          "Бот подключён, но адрес Mini App пока не настроен. Команда /demo создаст тестовую ветку."
+          "Бот подключён, но адрес контент-пульта пока не настроен."
         );
         return;
       }
 
       await this.configureUserMenu(telegramId, true);
-      await this.ensureDemoDraft(telegramId);
       const keyboard = this.miniAppWelcomeKeyboard(
         miniAppUrl,
         this.access.isOwner(telegramId)
@@ -96,22 +99,38 @@ export class TelegramBotService implements OnModuleInit {
     );
   }
 
-  private async handleDemo(context: Context): Promise<void> {
+  private async handleTopics(context: Context): Promise<void> {
     const telegramId = this.telegramId(context);
     if (!telegramId || !(await this.access.canUseMiniApp(telegramId))) {
-      await context.reply("Сначала запросите тестовый доступ у владельца бота.");
+      await context.reply("Доступ к темам выдаёт владелец бота.");
       return;
     }
-
-    if (!this.access.canMutateWorkspace(telegramId)) {
-      await context.reply("В рабочем режиме менять общий контент может только владелец.");
+    const result = await this.pool.query<{
+      text: string;
+      post_url: string;
+      username: string;
+      query: string | null;
+    }>(
+      `SELECT text, post_url, username, query
+       FROM market_posts
+       WHERE posted_at >= NOW() - INTERVAL '7 days'
+       ORDER BY posted_at DESC NULLS LAST, first_seen_at DESC
+       LIMIT 5`
+    );
+    if (result.rows.length === 0) {
+      await context.reply(
+        "Свежих подходящих тем пока нет. Я пришлю уведомление, когда найду сильный сигнал для вашего контента."
+      );
       return;
     }
-
-    const workspaceTelegramId = this.access.workspaceTelegramId();
-    const waiting = await this.drafts.listWaitingByExpert(workspaceTelegramId, 1);
-    const draft = waiting[0] ?? await this.drafts.createDemo(workspaceTelegramId);
-    await this.sendDraftCard(context, draft);
+    const items = result.rows.map((item, index) => {
+      const excerpt = item.text.length > 260 ? `${item.text.slice(0, 257)}…` : item.text;
+      const theme = item.query ? `\nСигнал: ${item.query}` : "";
+      return `${index + 1}. @${item.username}${theme}\n${excerpt}\n${item.post_url}`;
+    });
+    await context.reply(["Свежие темы для контента:", "", ...items].join("\n\n"), {
+      link_preview_options: { is_disabled: true }
+    });
   }
 
   private async handleCallback(context: Context): Promise<void> {
@@ -258,13 +277,13 @@ export class TelegramBotService implements OnModuleInit {
     try {
       await bot.api.setMyCommands([
         { command: "start", description: "Открыть пульт" },
-        { command: "demo", description: "Добавить тестовую ветку" }
+        { command: "topics", description: "Показать свежие темы" }
       ]);
       for (const ownerId of this.access.ownerIds()) {
         await bot.api.setMyCommands(
           [
             { command: "start", description: "Открыть пульт" },
-            { command: "demo", description: "Добавить тестовую ветку" },
+            { command: "topics", description: "Показать свежие темы" },
             { command: "admin", description: "Управление доступом" }
           ],
           { scope: { type: "chat", chat_id: ownerId } }
@@ -282,6 +301,22 @@ export class TelegramBotService implements OnModuleInit {
           error instanceof Error ? error.message : "неизвестная ошибка"
         }`
       );
+    }
+  }
+
+  private async configureBotProfile(bot: Bot): Promise<void> {
+    try {
+      await Promise.all([
+        bot.api.setMyName("Контент-пульт Максима"),
+        bot.api.setMyShortDescription(
+          "Ищу темы и веду согласование публикаций Максима в Threads."
+        ),
+        bot.api.setMyDescription(
+          "Личный контент-пульт Максима. Отслеживает обсуждения об автоматизации продаж, Telegram Mini Apps, веб- и мобильных приложениях, AI-аватарах и AI-блогерах. Присылает сильные темы и помогает согласовывать публикации в Threads."
+        )
+      ]);
+    } catch (error) {
+      this.logger.warn(`Не удалось обновить профиль Telegram: ${this.userFacingError(error)}`);
     }
   }
 
@@ -426,13 +461,6 @@ export class TelegramBotService implements OnModuleInit {
     if (result.alreadyDecided) return;
 
     if (accessGranted) {
-      try {
-        await this.ensureDemoDraft(result.request.telegramId);
-      } catch (error) {
-        this.logger.warn(
-          `Не удалось создать демо для ${result.request.telegramId}: ${this.userFacingError(error)}`
-        );
-      }
       await this.configureUserMenu(result.request.telegramId, true);
     }
     const miniAppUrl = this.miniAppUrl();
@@ -516,14 +544,6 @@ export class TelegramBotService implements OnModuleInit {
     }
   }
 
-  private async ensureDemoDraft(telegramId: string): Promise<void> {
-    const workspaceTelegramId = this.access.workspaceTelegramId();
-    const waitingDrafts = await this.drafts.listWaitingByExpert(workspaceTelegramId, 1);
-    if (waitingDrafts.length === 0 && this.access.canMutateWorkspace(telegramId)) {
-      await this.drafts.createDemo(workspaceTelegramId);
-    }
-  }
-
   private miniAppWelcomeKeyboard(
     miniAppUrl: string,
     includeAdmin: boolean
@@ -539,18 +559,16 @@ export class TelegramBotService implements OnModuleInit {
   }
 
   private miniAppBannerUrl(miniAppUrl: string): string {
-    return `${miniAppUrl.replace(/\/?$/, "/")}brand-banner-placeholder.svg`;
+    return `${miniAppUrl.replace(/\/?$/, "/")}maxim-avatar.jpg`;
   }
 
   private miniAppWelcomeText(): string {
     return [
-      "В Threads-пульте можно:",
-      "• проверить готовые посты;",
-      "• одобрить, отклонить или выбрать время;",
-      "• посмотреть план публикаций;",
-      "• проверить результаты и состояние публикаций.",
+      "Привет! Это мой личный контент-пульт для Threads.",
       "",
-      "Сейчас работает тестовый режим. В Threads ничего не публикуется."
+      "Я отслеживаю обсуждения про приложения для бизнеса, Telegram Mini Apps, автоматизацию продаж, AI-аватаров и AI-блогеров. Когда появляется сильная тема, бот присылает сигнал и источник.",
+      "",
+      "В пульте можно проверить текст, источники, выбрать время и поставить публикацию в план."
     ].join("\n");
   }
 

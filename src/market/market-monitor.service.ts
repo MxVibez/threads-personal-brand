@@ -1,16 +1,19 @@
-import { Inject, Injectable, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Pool, PoolClient } from "pg";
 import { DATABASE_POOL } from "../infrastructure/database/database.tokens";
 
 const SEARCH_TERMS = [
-  "Telegram Mini App для бизнеса",
-  "приложение для увеличения продаж",
-  "автоматизация продаж в мессенджере",
-  "веб-приложение для эксперта",
-  "мобильное приложение для бизнеса",
-  "AI-аватар для контента",
-  "AI-блогер для бренда"
+  "Telegram Mini App",
+  "приложение для бизнеса",
+  "автоматизация продаж",
+  "сервис для эксперта",
+  "мобильное приложение бизнес",
+  "AI аватар",
+  "ИИ аватар",
+  "AI блогер",
+  "ИИ блогер",
+  "контент для бренда"
 ];
 
 const APIFY_REQUEST_TIMEOUT_MS = 20_000;
@@ -27,6 +30,7 @@ type MarketItem = Record<string, unknown>;
 
 @Injectable()
 export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown {
+  private readonly logger = new Logger(MarketMonitorService.name);
   private startupTimer: NodeJS.Timeout | null = null;
   private interval: NodeJS.Timeout | null = null;
   private running = false;
@@ -37,7 +41,10 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   ) {}
 
   onModuleInit(): void {
-    if (this.config.get<string>("APIFY_MARKET_ENABLED", "false") !== "true") return;
+    const enabled =
+      this.config.get<string>("THREADS_MARKET_ENABLED", "false") === "true" ||
+      this.config.get<string>("APIFY_MARKET_ENABLED", "false") === "true";
+    if (!enabled) return;
     this.startupTimer = setTimeout(() => void this.runIfDue(), 8_000);
     this.interval = setInterval(() => void this.runIfDue(), 60 * 60 * 1_000);
   }
@@ -52,15 +59,13 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     this.running = true;
     let runRecordId: string | null = null;
     try {
+      const startedAt = new Date();
+      const threadsEnabled = this.config.get<string>("THREADS_MARKET_ENABLED", "false") === "true";
+      const threadsToken = this.config.get<string>("THREADS_ACCESS_TOKEN", "");
       const token = this.config.get<string>("APIFY_API_TOKEN", "");
       const actor = this.config.get<string>("APIFY_ACTOR_ID", "");
-      if (!token || !actor) return;
-
-      const testRuns = await this.pool.query<{ count: string }>(
-        "SELECT COUNT(*)::text AS count FROM market_monitor_runs"
-      );
-      const runLimit = this.config.get<number>("APIFY_TEST_RUN_LIMIT", 9);
-      if (Number(testRuns.rows[0]?.count ?? "0") >= runLimit) return;
+      if (threadsEnabled && !threadsToken) return;
+      if (!threadsEnabled && (!token || !actor)) return;
 
       const reserved = await this.pool.query<{ id: string }>(
         `INSERT INTO market_monitor_runs (run_date, status)
@@ -70,6 +75,24 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
       );
       runRecordId = reserved.rows[0]?.id ?? null;
       if (!runRecordId) return;
+
+      if (threadsEnabled) {
+        const maxResults = this.config.get<number>("THREADS_MARKET_SEARCH_LIMIT", 10);
+        await this.pool.query(
+          "UPDATE market_monitor_runs SET status = 'RUNNING' WHERE id = $1",
+          [runRecordId]
+        );
+        const items = await this.loadThreadsSearch(threadsToken, maxResults);
+        await this.storeItems(items);
+        await this.notifyOwners(startedAt);
+        await this.pool.query(
+          `UPDATE market_monitor_runs
+           SET status = 'SUCCEEDED', item_count = $2, finished_at = NOW(), error = NULL
+           WHERE id = $1`,
+          [runRecordId, items.length]
+        );
+        return;
+      }
 
       const maxResults = this.config.get<number>("APIFY_DAILY_MAX_RESULTS", 100);
       const maxCharge = this.config.get<number>("APIFY_MAX_CHARGE_USD", 0.5);
@@ -106,6 +129,100 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     } finally {
       this.running = false;
     }
+  }
+
+  private async loadThreadsSearch(accessToken: string, limit: number): Promise<MarketItem[]> {
+    const baseUrl = this.config.get<string>("THREADS_API_BASE_URL", "https://graph.threads.net").replace(/\/$/, "");
+    const version = this.config.get<string>("THREADS_API_VERSION", "v1.0");
+    const since = Math.floor((Date.now() - 48 * 60 * 60 * 1_000) / 1_000);
+    const items: MarketItem[] = [];
+    for (const query of SEARCH_TERMS) {
+      const params = new URLSearchParams({
+        q: query,
+        search_type: "RECENT",
+        search_mode: "KEYWORD",
+        fields: "id,text,permalink,timestamp,username,has_replies,is_quote_post,is_reply",
+        limit: String(limit),
+        since: String(since)
+      });
+      const response = await fetch(`${baseUrl}/${version}/keyword_search?${params}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS)
+      });
+      const payload = await response.json().catch(() => null) as
+        | { data?: MarketItem[]; error?: { message?: unknown } }
+        | null;
+      if (!response.ok) {
+        const detail = typeof payload?.error?.message === "string"
+          ? payload.error.message
+          : `HTTP ${response.status}`;
+        throw new Error(`Threads keyword search failed: ${detail}`);
+      }
+      for (const item of payload?.data ?? []) items.push({ ...item, query });
+    }
+    return items;
+  }
+
+  private async notifyOwners(startedAt: Date): Promise<void> {
+    const botToken = this.config.get<string>("TELEGRAM_BOT_TOKEN", "");
+    const ownerIds = this.config.get<string>("EXPERT_TELEGRAM_IDS", "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => /^\d+$/.test(value));
+    if (!botToken || ownerIds.length === 0) return;
+
+    const candidates = await this.pool.query<{
+      id: string;
+      username: string;
+      text: string;
+      post_url: string;
+      query: string | null;
+    }>(
+      `SELECT id, username, text, post_url, query
+       FROM market_posts
+       WHERE first_seen_at >= $1 AND notified_at IS NULL
+       ORDER BY posted_at DESC NULLS LAST, first_seen_at DESC
+       LIMIT 3`,
+      [startedAt]
+    );
+    if (candidates.rows.length === 0) return;
+
+    const miniAppUrl = `${this.config.get<string>("APP_BASE_URL", "").replace(/\/$/, "")}/miniapp/`;
+    const lines = candidates.rows.map((item, index) => {
+      const excerpt = item.text.length > 280 ? `${item.text.slice(0, 277)}…` : item.text;
+      return `${index + 1}. ${item.query ?? "Новый сигнал"}\n@${item.username}: ${excerpt}\n${item.post_url}`;
+    });
+    const text = [
+      "Нашёл темы, которые подходят вам",
+      "",
+      ...lines,
+      "",
+      "Собрал только свежие обсуждения за последние 48 часов. Команда /topics покажет последние найденные сигналы."
+    ].join("\n\n");
+
+    for (const chatId of ownerIds) {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          link_preview_options: { is_disabled: true },
+          reply_markup: miniAppUrl.startsWith("https://")
+            ? { inline_keyboard: [[{ text: "Открыть контент-пульт", web_app: { url: miniAppUrl } }]] }
+            : undefined
+        }),
+        signal: AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS)
+      });
+      if (!response.ok) {
+        this.logger.warn(`Telegram topic notification failed: HTTP ${response.status}`);
+        return;
+      }
+    }
+    await this.pool.query(
+      "UPDATE market_posts SET notified_at = NOW() WHERE id = ANY($1::uuid[])",
+      [candidates.rows.map((item) => item.id)]
+    );
   }
 
   private async startActor(
@@ -217,7 +334,7 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   private async storeItem(client: PoolClient, item: MarketItem): Promise<void> {
     const text = this.string(item.text ?? item.caption ?? item.content).slice(0, MAX_MARKET_TEXT_LENGTH);
     const username = this.string(item.username ?? (item.author as Record<string, unknown> | undefined)?.username).slice(0, 120);
-    const postUrl = this.threadsUrl(item.postUrl ?? item.post_url ?? item.url);
+    const postUrl = this.threadsUrl(item.postUrl ?? item.post_url ?? item.permalink ?? item.url);
     if (!text || !username || !postUrl) return;
     await client.query(
       `INSERT INTO market_posts (
@@ -238,7 +355,7 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
          raw = EXCLUDED.raw,
          updated_at = NOW()`,
       [
-        this.string(item.postCode ?? item.post_code).slice(0, 160) || null,
+        this.string(item.postCode ?? item.post_code ?? item.id).slice(0, 160) || null,
         postUrl,
         username,
         this.string(item.query).slice(0, 240) || null,
@@ -250,7 +367,7 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
         this.number(item.shareCount ?? item.share_count ?? item.shares),
         this.number(item.viewCount ?? item.view_count ?? item.views),
         item.isReply === true || item.is_reply === true,
-        this.date(item.postedAt ?? item.posted_at),
+        this.date(item.postedAt ?? item.posted_at ?? item.timestamp),
         this.date(item.scrapedAt ?? item.scraped_at),
         this.safeRawItem(item)
       ]

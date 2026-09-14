@@ -23,6 +23,8 @@ const envSchema = z
     THREADS_USER_ID: z.string().default(""),
     THREADS_ACCESS_TOKEN: z.string().default(""),
     THREADS_DRY_RUN: z.enum(["true", "false"]).default("true"),
+    THREADS_MARKET_ENABLED: z.enum(["true", "false"]).default("false"),
+    THREADS_MARKET_SEARCH_LIMIT: z.coerce.number().int().min(1).max(25).default(10),
     OPENAI_API_KEY: z.string().default(""),
     OPENAI_CLASSIFIER_MODEL: z.string().default("gpt-5.6-luna"),
     OPENAI_WRITER_MODEL: z.string().default("gpt-5.6-terra"),

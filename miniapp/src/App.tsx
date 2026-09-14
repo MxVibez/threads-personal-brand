@@ -11,7 +11,6 @@ import { useSwipeCard } from "./useSwipeCard";
 import {
   approveDraft,
   cancelPlannedPublication,
-  createDemoDraft,
   loadBootstrap,
   loadExpertSettings,
   loadPlan,
@@ -386,8 +385,6 @@ export function App() {
   const [mode, setMode] = useState<"dry-run" | "live">("dry-run");
   const [publishingSettings, setPublishingSettings] = useState(defaultExpertSettings);
   const [submitting, setSubmitting] = useState(false);
-  const [creatingDemo, setCreatingDemo] = useState(false);
-  const [emptyError, setEmptyError] = useState("");
   const [sheetError, setSheetError] = useState("");
   const [online, setOnline] = useState(navigator.onLine);
   const decisionInFlight = useRef(false);
@@ -574,33 +571,6 @@ export function App() {
     }
   }
 
-  function resetDemo() {
-    setQueue(TOPICS);
-    setApproved([]);
-    setBrowseIndex(0);
-    setToast("Демо-очередь восстановлена");
-  }
-
-  async function addDemoDraft() {
-    if (!initDataRef.current) return;
-    setCreatingDemo(true);
-    setEmptyError("");
-    try {
-      const result = await createDemoDraft(initDataRef.current);
-      setQueue([draftToTopic(result.draft)]);
-      setBrowseIndex(0);
-      setToast(result.existing ? "Тестовая ветка уже в очереди" : "Тестовая ветка добавлена");
-      haptic("success");
-    } catch (error) {
-      setEmptyError(
-        error instanceof Error ? error.message : "Не удалось добавить тестовую ветку"
-      );
-      haptic("error");
-    } finally {
-      setCreatingDemo(false);
-    }
-  }
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -644,10 +614,6 @@ export function App() {
               haptic("select");
               setBrowseIndex((current) => Math.min(queue.length - 1, current + 1));
             }}
-            onReset={import.meta.env.DEV ? resetDemo : undefined}
-            onCreateDemo={addDemoDraft}
-            creatingDemo={creatingDemo}
-            emptyError={emptyError}
             onOpenPlan={() => setScreen("plan")}
             mode={mode}
           />
@@ -754,10 +720,6 @@ function FeedScreen({
   onEvidence,
   onPrevious,
   onNext,
-  onReset,
-  onCreateDemo,
-  creatingDemo,
-  emptyError,
   onOpenPlan,
   mode
 }: {
@@ -770,10 +732,6 @@ function FeedScreen({
   onEvidence: () => void;
   onPrevious: () => void;
   onNext: () => void;
-  onReset?: () => void;
-  onCreateDemo: () => void | Promise<void>;
-  creatingDemo: boolean;
-  emptyError: string;
   onOpenPlan: () => void;
   mode: "dry-run" | "live";
 }) {
@@ -784,7 +742,7 @@ function FeedScreen({
         <button onClick={onOpenPlan}>В работе</button>
       </div>
       {mode === "dry-run" && (
-        <div className="test-mode-note"><span>Тест</span> Threads ничего не публикует</div>
+        <div className="test-mode-note"><span>Контроль</span> Первая публикация ждёт подключения Threads</div>
       )}
       <div className="intro-row">
         <div>
@@ -830,20 +788,8 @@ function FeedScreen({
       ) : (
         <div className="empty-state">
           <div className="empty-mark"><Icon name="check" size={30} /></div>
-          <h2>Готово на сегодня</h2>
-          <p>Все решения сохранены. Новые материалы появятся после следующего анализа рынка.</p>
-          {onReset ? (
-            <button className="secondary-button" onClick={onReset}><Icon name="reset" size={18} /> Вернуть демо-карточки</button>
-          ) : (
-            <button
-              className="approve-button empty-primary-action"
-              disabled={creatingDemo}
-              onClick={() => void onCreateDemo()}
-            >
-              {creatingDemo ? "Добавляем…" : "Добавить тестовую ветку"}
-            </button>
-          )}
-          {emptyError && <p className="sheet-error" role="alert">{emptyError}</p>}
+          <h2>Новых материалов пока нет</h2>
+          <p>Бот пришлёт уведомление, когда найдёт свежую тему, которая подходит вашему позиционированию.</p>
         </div>
       )}
     </section>
@@ -894,8 +840,8 @@ function SwipeCard({
       <div className="post-author-row">
         <img
           className="expert-avatar"
-          src={`${import.meta.env.BASE_URL}avatar-placeholder.svg`}
-          alt="Аватар Максима — временная заглушка"
+          src={`${import.meta.env.BASE_URL}maxim-avatar.png`}
+          alt="Максим Еременко"
           width="38"
           height="38"
           decoding="async"
@@ -1080,7 +1026,7 @@ function PlanScreen({
         ))}
       </div> : <div className="compact-empty"><strong>План пока пуст</strong><p>Одобрите материал в ленте — он появится здесь сразу.</p></div>}
       {error && <p className="sheet-error" role="alert">{error}</p>}
-      {mode === "dry-run" && <div className="notice-card"><Icon name="clock" /><div><strong>Расписание работает в тестовом режиме</strong><p>Одобренные материалы сохраняются, но пока не публикуются в Threads.</p></div></div>}
+      {mode === "dry-run" && <div className="notice-card"><Icon name="clock" /><div><strong>Публикация пока под контролем</strong><p>План сохраняется, а отправка в Threads включится после проверки подключения аккаунта.</p></div></div>}
       {confirmation && <div className="toast" role="status"><Icon name="check" size={18} /> {confirmation}</div>}
       {selectedForRemoval && <BottomSheet onClose={() => !removing && setSelectedForRemoval(null)}>
         <p className="section-kicker">Подтверждение</p>
@@ -1100,7 +1046,7 @@ type ResultsDetail =
   | { kind: "metric"; title: string; value: number; detail: string }
   | null;
 
-const demoThreadsInsights: ThreadsInsightsDto = {
+const emptyThreadsInsights: ThreadsInsightsDto = {
   available: false,
   periodDays: 7,
   totals: {
@@ -1109,56 +1055,16 @@ const demoThreadsInsights: ThreadsInsightsDto = {
     interactions: 0,
     engagementRate: 0
   },
-  timeline: [
-    { label: "Пн", views: 0 },
-    { label: "Вт", views: 0 },
-    { label: "Ср", views: 0 },
-    { label: "Чт", views: 0 },
-    { label: "Пт", views: 0 },
-    { label: "Сб", views: 0 },
-    { label: "Вс", views: 0 }
-  ],
-  topPosts: [
-    {
-      id: "demo-top-1",
-      text: "Когда бизнесу нужен не ещё один сайт, а приложение внутри мессенджера",
-      views: 0,
-      likes: 0,
-      replies: 0,
-      reposts: 0,
-      quotes: 0
-    },
-    {
-      id: "demo-top-2",
-      text: "Telegram Mini App нужен не каждому бизнесу. И это хорошая новость.",
-      views: 0,
-      likes: 0,
-      replies: 0,
-      reposts: 0,
-      quotes: 0
-    },
-    {
-      id: "demo-top-3",
-      text: "AI-аватар не заменяет эксперта. Он убирает зависимость контента от съёмочного дня.",
-      views: 0,
-      likes: 0,
-      replies: 0,
-      reposts: 0,
-      quotes: 0
-    }
-  ],
-  themes: [
-    { label: "Приложения и продажи", averageViews: 0, posts: 0 },
-    { label: "Telegram Mini Apps", averageViews: 0, posts: 0 },
-    { label: "AI-аватары и AI-блогеры", averageViews: 0, posts: 0 }
-  ]
+  timeline: [],
+  topPosts: [],
+  themes: []
 };
 
-const demoResults: ResultsResponse = {
+const localPreviewResults: ResultsResponse = {
   counts: {
-    waiting: 4,
-    approved: 7,
-    rejected: 2,
+    waiting: 0,
+    approved: 0,
+    rejected: 0,
     published: 0,
     failed: 0
   },
@@ -1195,7 +1101,7 @@ const demoResults: ResultsResponse = {
       nextStep: "Добавить API key и примеры текстов эксперта."
     }
   ],
-  insights: demoThreadsInsights
+  insights: emptyThreadsInsights
 };
 
 function ResultsScreen({ initData }: { initData: string }) {
@@ -1208,7 +1114,7 @@ function ResultsScreen({ initData }: { initData: string }) {
     setLoading(true);
     setError("");
     if (!initData && import.meta.env.DEV) {
-      setData(demoResults);
+      setData(localPreviewResults);
       setLoading(false);
       return;
     }
@@ -1240,7 +1146,7 @@ function ResultsScreen({ initData }: { initData: string }) {
     { title: "Отклонено", value: data.counts.rejected, detail: "Материалы, которые вы убрали из очереди." },
     { title: "Опубликовано", value: data.counts.published, detail: "Завершённые публикации. В dry-run реальные посты не создаются." }
   ];
-  const insights = data.insights?.available ? data.insights : demoThreadsInsights;
+  const insights = data.insights;
   const maxDailyViews = Math.max(...insights.timeline.map((item) => item.views), 1);
   const maxThemeViews = Math.max(...insights.themes.map((item) => item.averageViews), 1);
 
@@ -1253,8 +1159,8 @@ function ResultsScreen({ initData }: { initData: string }) {
 
       {!data.insights?.available && (
         <div className="analytics-preview-note">
-          <span>Демо</span>
-          <div><strong>Так будет выглядеть аналитика</strong><p>После подключения Threads API здесь появятся реальные данные аккаунта.</p></div>
+          <span>Threads</span>
+          <div><strong>Аналитика появится после подключения</strong><p>Здесь будут только реальные данные вашего аккаунта — без подставных цифр.</p></div>
         </div>
       )}
 
@@ -1399,7 +1305,7 @@ function SettingsScreen({ initData, onSaved }: { initData: string; onSaved: (set
     setIntegrationsLoading(true);
     setIntegrationsError("");
     if (!initData && import.meta.env.DEV) {
-      setIntegrations(demoResults.integrations);
+      setIntegrations(localPreviewResults.integrations);
       setIntegrationsLoading(false);
       return;
     }
@@ -1514,7 +1420,7 @@ function SettingsScreen({ initData, onSaved }: { initData: string; onSaved: (set
         <button className="voice-setting-card" onClick={() => setVoiceOpen(true)}>
           <img
             className="voice-setting-photo"
-            src={`${import.meta.env.BASE_URL}avatar-placeholder.svg`}
+            src={`${import.meta.env.BASE_URL}maxim-avatar.png`}
             alt=""
             width="46"
             height="46"
