@@ -59,6 +59,6 @@ unset threads_telegram_token
 
 cd "$project_dir"
 docker compose up -d --force-recreate api worker
-docker compose run --rm api npm run telegram:set-webhook
+docker compose run --rm api node scripts/register-telegram-webhook.mjs
 
 echo 'Telegram-бот подключён. Откройте его и отправьте /start, затем /demo.'

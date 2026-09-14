@@ -101,7 +101,8 @@ Production-контур 2026-09-14:
 - HTTPS: `https://217-149-26-19.sslip.io`;
 - API readiness и Mini App HTTP 200 — PASS;
 - контейнеры PostgreSQL, Redis, API и Mini App healthy — PASS;
-- Telegram webhook, настоящий Telegram WebView и Meta live publish — NOT RUN до подключения credentials;
+- Telegram bot identity и webhook URL — PASS;
+- настоящий Telegram WebView и Meta live publish — NOT RUN до подключения Meta credentials;
 - `THREADS_DRY_RUN=true` сохранён.
 
 Проверено 2026-09-14 на Node.js 24.14.0:

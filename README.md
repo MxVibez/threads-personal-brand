@@ -62,4 +62,4 @@ GitHub Actions повторяет typecheck, тесты, production build и а�
 - health check: <https://217-149-26-19.sslip.io/api/health/ready>
 - Debian 13, Docker Compose, 2 ГБ swap, HTTPS через Caddy/Let's Encrypt.
 
-Контейнеры и HTTPS проверены 2026-09-14. Telegram-бот и Meta Threads ещё не подключены; реальный Telegram WebView и live-публикация не проверены.
+Контейнеры, HTTPS и Telegram webhook проверены 2026-09-14. Meta Threads ещё не подключён; реальный Telegram WebView и live-публикация не проверены.
