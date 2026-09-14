@@ -2,6 +2,13 @@ import type { ConfigService } from "@nestjs/config";
 import type { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadsResultsService } from "../src/results/threads-results.service";
+import { emptyAnalytics, type ThreadsAnalyticsService } from "../src/results/threads-analytics.service";
+
+function analyticsStub(): ThreadsAnalyticsService {
+  return {
+    dashboard: vi.fn().mockResolvedValue(emptyAnalytics())
+  } as unknown as ThreadsAnalyticsService;
+}
 
 describe("ThreadsResultsService", () => {
   it("returns real counters and reports unconfigured providers", async () => {
@@ -22,7 +29,7 @@ describe("ThreadsResultsService", () => {
         return fallback;
       }
     } as unknown as ConfigService;
-    const service = new ThreadsResultsService(config, pool);
+    const service = new ThreadsResultsService(config, pool, analyticsStub());
 
     const result = await service.dashboard("1001");
 
@@ -52,7 +59,7 @@ describe("ThreadsResultsService", () => {
         return fallback;
       }
     } as unknown as ConfigService;
-    const service = new ThreadsResultsService(config, pool);
+    const service = new ThreadsResultsService(config, pool, analyticsStub());
 
     const result = await service.dashboard("1001");
     const apify = result.integrations.find((item) => item.id === "apify");

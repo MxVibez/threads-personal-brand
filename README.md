@@ -12,7 +12,7 @@
 - Тесты серверных инвариантов и touch/swipe-взаимодействий.
 - Docker Compose для локального контура.
 
-Рабочий контур: материал появляется в Telegram Mini App, Максим одобряет его и выбирает время, после чего worker автоматически публикует ветку. Реальные публикации, сбор внешних данных и Telegram-бот отключены, пока не заданы отдельные credentials. `THREADS_DRY_RUN=true` обязателен для первоначального запуска.
+Рабочий контур: материал появляется в Telegram Mini App, Максим одобряет его и выбирает время, после чего worker автоматически публикует ветку. Telegram и Threads API подключаются только серверными credentials. `THREADS_DRY_RUN=true` обязателен до подтверждённого контрольного поста.
 
 ## Быстрая локальная проверка без внешних API
 
@@ -62,4 +62,4 @@ GitHub Actions повторяет typecheck, тесты, production build и а�
 - health check: <https://217-149-26-19.sslip.io/api/health/ready>
 - Debian 13, Docker Compose, 2 ГБ swap, HTTPS через Caddy/Let's Encrypt.
 
-Контейнеры, HTTPS и Telegram webhook проверены 2026-09-14. Meta Threads ещё не подключён; реальный Telegram WebView и live-публикация не проверены.
+Контейнеры, HTTPS, Telegram webhook и реальная Threads Analytics проверены 2026-09-14. Чтение профиля, собственных постов, account/post insights и создание неопубликованного контейнера работают на реальном аккаунте. Публичный `threads_publish` и настоящая мобильная Telegram WebView остаются отдельными контрольными проверками. Threads-токен продлевается дважды в месяц; PostgreSQL резервируется ежедневно с локальным хранением 7 дней.

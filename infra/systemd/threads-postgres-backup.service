@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up Threads Content Workspace PostgreSQL
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/threads-personal-brand
+ExecStart=/opt/threads-personal-brand/scripts/backup-postgres.sh /opt/threads-personal-brand
+User=root

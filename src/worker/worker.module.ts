@@ -14,6 +14,8 @@ import { MarketMonitorService } from "../market/market-monitor.service";
 import { WorkerRuntimeService } from "./worker-runtime.service";
 import { QueueModule } from "../infrastructure/queue/queue.module";
 import { PublicationRecoveryService } from "./publication-recovery.service";
+import { ThreadsAnalyticsService } from "../results/threads-analytics.service";
+import { ThreadsAnalyticsRefreshService } from "./threads-analytics-refresh.service";
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { PublicationRecoveryService } from "./publication-recovery.service";
     ProcessPublicationService,
     WorkerRuntimeService,
     PublicationRecoveryService,
+    ThreadsAnalyticsService,
+    ThreadsAnalyticsRefreshService,
     MarketMonitorService,
     TelegramPublicationNotifier,
     { provide: PUBLICATION_NOTIFIER, useExisting: TelegramPublicationNotifier },

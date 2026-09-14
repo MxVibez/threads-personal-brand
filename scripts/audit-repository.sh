@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-tracked_forbidden="$(git ls-files | rg '(^|/)(node_modules|dist|coverage)(/|$)|\.(db|sqlite|sqlite3|jpg|jpeg|png|webp|gif)$' || true)"
+tracked_forbidden="$(git ls-files \
+  | rg '(^|/)(node_modules|dist|coverage)(/|$)|\.(db|sqlite|sqlite3|jpg|jpeg|png|webp|gif)$' \
+  | rg -v '^miniapp/public/maxim-avatar\.(jpg|png)$' || true)"
 tracked_env="$(git ls-files | rg '(^|/)\.env($|\.)' | rg -v '(^|/)\.env\.example$' || true)"
 
 if [ -n "$tracked_forbidden" ] || [ -n "$tracked_env" ]; then

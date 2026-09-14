@@ -2,6 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Pool } from "pg";
 import { DATABASE_POOL } from "../infrastructure/database/database.tokens";
+import {
+  ThreadsAnalyticsService,
+  type ThreadsAnalyticsDashboard
+} from "./threads-analytics.service";
 
 export interface ThreadsResultsDashboard {
   counts: {
@@ -19,39 +23,19 @@ export interface ThreadsResultsDashboard {
     detail: string;
     nextStep?: string;
   }>;
-  insights: {
-    available: boolean;
-    periodDays: number;
-    totals: {
-      views: number;
-      followersGained: number;
-      interactions: number;
-      engagementRate: number;
-    };
-    timeline: Array<{ label: string; views: number }>;
-    topPosts: Array<{
-      id: string;
-      text: string;
-      views: number;
-      likes: number;
-      replies: number;
-      reposts: number;
-      quotes: number;
-      permalink?: string;
-    }>;
-    themes: Array<{ label: string; averageViews: number; posts: number }>;
-  };
+  insights: ThreadsAnalyticsDashboard;
 }
 
 @Injectable()
 export class ThreadsResultsService {
   constructor(
     private readonly config: ConfigService,
-    @Inject(DATABASE_POOL) private readonly pool: Pool
+    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    private readonly analytics: ThreadsAnalyticsService
   ) {}
 
   async dashboard(userTelegramId: string): Promise<ThreadsResultsDashboard> {
-    const [drafts, publications, market] = await Promise.all([
+    const [drafts, publications, market, insights] = await Promise.all([
       this.pool.query<{ status: string; count: string }>(
         `SELECT status, COUNT(*)::text AS count
          FROM drafts WHERE expert_telegram_id = $1
@@ -79,7 +63,8 @@ export class ThreadsResultsService {
            (SELECT COUNT(*) FROM market_posts)::text AS post_count,
            (SELECT COUNT(*) FROM market_accounts)::text AS account_count,
            (SELECT COUNT(*) FROM market_posts WHERE position(chr(63) in text) > 0)::text AS question_count`
-      )
+      ),
+      this.analytics.dashboard()
     ]);
 
     const draftCount = this.countMap(drafts.rows);
@@ -193,19 +178,7 @@ export class ThreadsResultsService {
             : "Добавить API key и примеры текстов эксперта."
         }
       ],
-      insights: {
-        available: false,
-        periodDays: 7,
-        totals: {
-          views: 0,
-          followersGained: 0,
-          interactions: 0,
-          engagementRate: 0
-        },
-        timeline: [],
-        topPosts: [],
-        themes: []
-      }
+      insights
     };
   }
 

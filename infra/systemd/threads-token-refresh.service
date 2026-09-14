@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Threads long-lived access token
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/threads-personal-brand
+ExecStart=/opt/threads-personal-brand/scripts/refresh-threads-token.sh /opt/threads-personal-brand
+User=root

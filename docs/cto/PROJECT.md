@@ -60,7 +60,8 @@
 Все привилегированные значения существуют только в server runtime environment и перечислены без значений в `.env.example`:
 
 - отдельный `TELEGRAM_BOT_TOKEN`;
-- `META_THREADS_APP_ID` и `META_THREADS_APP_SECRET`;
+- публичный `META_THREADS_APP_ID`; App Secret используется только во время
+  интерактивного обмена токена и не хранится в runtime `.env`;
 - `THREADS_USER_ID` и `THREADS_ACCESS_TOKEN`;
 - `APIFY_API_TOKEN` и webhook secret;
 - `OPENAI_API_KEY`;
@@ -91,7 +92,7 @@
 
 ## Статус
 
-Этап: основа персонализирована под услуги и воронку Максима и развёрнута на отдельном VPS Timeweb Cloud. Автоматическая публикация одобренных материалов реализована; реальные Telegram и Meta credentials ещё не подключены.
+Этап: основа персонализирована под услуги и воронку Максима и развёрнута на отдельном VPS Timeweb Cloud. Telegram и Threads API подключены. Реальная аналитика работает; публичная публикация остаётся под ручным контролем до подтверждённого контрольного поста.
 
 Production-контур 2026-09-14:
 
@@ -102,8 +103,30 @@ Production-контур 2026-09-14:
 - API readiness и Mini App HTTP 200 — PASS;
 - контейнеры PostgreSQL, Redis, API и Mini App healthy — PASS;
 - Telegram bot identity и webhook URL — PASS;
-- настоящий Telegram WebView и Meta live publish — NOT RUN до подключения Meta credentials;
+- Threads profile, список публикаций и `threads_manage_insights` — PASS на реальном аккаунте;
+- неопубликованный Threads media container — PASS; публичный `threads_publish` — NOT RUN до подтверждения текста;
+- настоящий Telegram WebView — NOT RUN;
 - `THREADS_DRY_RUN=true` сохранён.
+
+Обновление аналитики и эксплуатации 2026-09-14:
+
+- сервер получает 30-дневные account insights и lifetime insights собственных постов через официальный Threads API;
+- Mini App показывает реальные просмотры профиля, подписчиков, взаимодействия, лучшие публикации, заходы и тематические группы;
+- данные кэшируются в PostgreSQL на 15 минут, обновляются worker-процессом и остаются доступны при кратком сбое Meta с явной пометкой устаревших данных;
+- ссылки из Meta проходят allowlist `https://*.threads.com` и `https://*.threads.net` перед отправкой во frontend;
+- Threads Access Token и Telegram bot token остаются только в server runtime; Threads App Secret после обмена токена удалён и не хранится;
+- systemd timer обновляет долгосрочный Threads-токен дважды в месяц;
+- ежедневный `pg_dump` хранится 7 дней на VPS; тест чтения архива через `pg_restore --list` — PASS. Внешний off-site backup пока не настроен.
+
+Проверки этого обновления:
+
+- backend typecheck/build — PASS; 10 файлов и 43 теста — PASS;
+- Mini App typecheck/build — PASS; 2 файла и 17 тестов — PASS;
+- production smoke внутри API: валидная Telegram-сессия, bootstrap, план, результаты и настройки — PASS;
+- запрос без Telegram initData, поддельная подпись и неверный Telegram webhook secret получают HTTP 401 — PASS;
+- production bundle не содержит provider token/secret markers — PASS;
+- `npm audit --omit=dev` для backend и Mini App — 0 известных уязвимостей;
+- настоящая мобильная Telegram WebView-сессия и публичный Threads post — NOT RUN.
 
 Проверено 2026-09-14 на Node.js 24.14.0:
 

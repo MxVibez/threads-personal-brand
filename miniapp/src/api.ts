@@ -61,10 +61,15 @@ export interface PlannedPublicationDto {
 
 export interface ThreadsInsightsDto {
   available: boolean;
+  stale: boolean;
+  incomplete: boolean;
   periodDays: number;
+  updatedAt?: string;
+  unavailableReason?: string;
   totals: {
-    views: number;
-    followersGained: number;
+    profileViews: number;
+    followers: number;
+    postViews: number;
     interactions: number;
     engagementRate: number;
   };
@@ -72,6 +77,8 @@ export interface ThreadsInsightsDto {
   topPosts: Array<{
     id: string;
     text: string;
+    hook: string;
+    publishedAt: string;
     views: number;
     likes: number;
     replies: number;
@@ -80,6 +87,7 @@ export interface ThreadsInsightsDto {
     permalink?: string;
   }>;
   themes: Array<{ label: string; averageViews: number; posts: number }>;
+  takeaway?: string;
 }
 
 export type ExpertTimezone =

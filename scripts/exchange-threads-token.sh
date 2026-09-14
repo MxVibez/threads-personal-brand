@@ -81,6 +81,16 @@ curl --silent --show-error --fail \
     exit 1
   }
 
+curl --silent --show-error --fail \
+  --get \
+  --header "Authorization: Bearer $long_token" \
+  --data-urlencode 'metric=views,likes,replies,reposts,quotes,followers_count' \
+  'https://graph.threads.net/v1.0/me/threads_insights' >/dev/null || {
+    unset short_token long_token app_secret exchange_response profile_response
+    echo 'У токена нет рабочего доступа threads_manage_insights. Настройки не изменены.' >&2
+    exit 1
+  }
+
 upsert_env() {
   threads_key="$1"
   threads_value="$2"
@@ -96,9 +106,11 @@ upsert_env() {
 }
 
 upsert_env META_THREADS_APP_ID 1087966097033130
-upsert_env META_THREADS_APP_SECRET "$app_secret"
 upsert_env THREADS_USER_ID "$threads_user_id"
 upsert_env THREADS_ACCESS_TOKEN "$long_token"
+now="$(date +%s)"
+upsert_env THREADS_TOKEN_REFRESHED_AT "$now"
+upsert_env THREADS_TOKEN_EXPIRES_AT "$((now + ${expires_in:-5184000}))"
 upsert_env THREADS_DRY_RUN true
 upsert_env THREADS_MARKET_ENABLED true
 chmod 600 "$env_file"

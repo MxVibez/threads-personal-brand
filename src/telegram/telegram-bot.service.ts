@@ -43,7 +43,6 @@ export class TelegramBotService implements OnModuleInit {
     bot.on("callback_query:data", async (context) => this.handleCallback(context));
     await bot.init();
     this.bot = bot;
-    await this.configureBotProfile(bot);
     await this.configureBotMenu(bot);
   }
 
@@ -76,7 +75,7 @@ export class TelegramBotService implements OnModuleInit {
           reply_markup: keyboard
         });
       } catch (error) {
-        this.logger.warn(`Не удалось отправить welcome-баннер: ${this.userFacingError(error)}`);
+        this.logger.warn(`Не удалось отправить welcome-баннер: ${this.safeLogError(error)}`);
         await context.reply(this.miniAppWelcomeText(), { reply_markup: keyboard });
       }
       return;
@@ -304,22 +303,6 @@ export class TelegramBotService implements OnModuleInit {
     }
   }
 
-  private async configureBotProfile(bot: Bot): Promise<void> {
-    try {
-      await Promise.all([
-        bot.api.setMyName("Контент-пульт Максима"),
-        bot.api.setMyShortDescription(
-          "Ищу темы и веду согласование публикаций Максима в Threads."
-        ),
-        bot.api.setMyDescription(
-          "Личный контент-пульт Максима. Отслеживает обсуждения об автоматизации продаж, Telegram Mini Apps, веб- и мобильных приложениях, AI-аватарах и AI-блогерах. Присылает сильные темы и помогает согласовывать публикации в Threads."
-        )
-      ]);
-    } catch (error) {
-      this.logger.warn(`Не удалось обновить профиль Telegram: ${this.userFacingError(error)}`);
-    }
-  }
-
   private async handleAdmin(context: Context): Promise<void> {
     const telegramId = this.telegramId(context);
     if (!telegramId) return;
@@ -408,14 +391,14 @@ export class TelegramBotService implements OnModuleInit {
         await context.api.sendMessage(ownerId, message, { reply_markup: keyboard });
       } catch (error) {
         this.logger.warn(
-          `Не удалось уведомить владельца ${ownerId}: ${this.userFacingError(error)}`
+          `Не удалось уведомить владельца ${ownerId}: ${this.safeLogError(error)}`
         );
       }
     }
     try {
       await context.reply("Запрос отправлен владельцу. Бот напишет, когда доступ откроют.");
     } catch (error) {
-      this.logger.warn(`Не удалось подтвердить запрос пользователю: ${this.userFacingError(error)}`);
+      this.logger.warn(`Не удалось подтвердить запрос пользователю: ${this.safeLogError(error)}`);
     }
   }
 
@@ -482,7 +465,7 @@ export class TelegramBotService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.warn(
-        `Не удалось уведомить тестировщика ${result.request.telegramId}: ${this.userFacingError(error)}`
+        `Не удалось уведомить тестировщика ${result.request.telegramId}: ${this.safeLogError(error)}`
       );
       if (accessGranted && keyboard) {
         try {
@@ -493,7 +476,7 @@ export class TelegramBotService implements OnModuleInit {
           );
         } catch (fallbackError) {
           this.logger.warn(
-            `Не удалось отправить текстовое уведомление тестировщику ${result.request.telegramId}: ${this.userFacingError(fallbackError)}`
+            `Не удалось отправить текстовое уведомление тестировщику ${result.request.telegramId}: ${this.safeLogError(fallbackError)}`
           );
         }
       }
@@ -538,7 +521,7 @@ export class TelegramBotService implements OnModuleInit {
         );
       } catch (error) {
         this.logger.warn(
-          `Не удалось уведомить тестировщика ${testerTelegramId}: ${this.userFacingError(error)}`
+          `Не удалось уведомить тестировщика ${testerTelegramId}: ${this.safeLogError(error)}`
         );
       }
     }
@@ -593,7 +576,7 @@ export class TelegramBotService implements OnModuleInit {
       });
     } catch (error) {
       this.logger.warn(
-        `Не удалось обновить меню пользователя ${telegramId}: ${this.userFacingError(error)}`
+        `Не удалось обновить меню пользователя ${telegramId}: ${this.safeLogError(error)}`
       );
     }
   }
@@ -619,5 +602,15 @@ export class TelegramBotService implements OnModuleInit {
     if (error instanceof DraftAccessDeniedError || error instanceof DraftNotFoundError ||
         error instanceof DraftStateError || error instanceof DraftVersionConflictError) return error.message;
     return "Не удалось выполнить действие. Черновик сохранён, попробуйте ещё раз.";
+  }
+
+  private safeLogError(error: unknown): string {
+    const token = this.config.get<string>("TELEGRAM_BOT_TOKEN", "");
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "unknown Telegram error";
+    return (token ? message.split(token).join("[REDACTED]") : message).slice(0, 500);
   }
 }

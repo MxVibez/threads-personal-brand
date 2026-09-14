@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily backup for Threads Content Workspace
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

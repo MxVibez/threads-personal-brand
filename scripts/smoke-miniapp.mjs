@@ -48,6 +48,9 @@ assert(Array.isArray(plan.body.publications));
 const results = await get("/miniapp/results");
 assert.equal(results.response.status, 200);
 assert(Array.isArray(results.body.integrations));
+assert.equal(results.body.insights?.available, true);
+assert.equal(results.body.insights?.stale, false);
+assert(Array.isArray(results.body.insights?.topPosts));
 const settings = await get("/miniapp/settings");
 assert.equal(settings.response.status, 200);
 assert.deepEqual(settings.body, bootstrap.body.settings);
@@ -61,6 +64,11 @@ console.log(JSON.stringify({
   completeSegments: bootstrap.body.drafts.reduce((sum, draft) => sum + draft.segments.length, 0),
   planned: plan.body.publications.length,
   integrations: results.body.integrations.map(({ id, state }) => ({ id, state })),
+  analytics: {
+    available: results.body.insights.available,
+    stale: results.body.insights.stale,
+    topPosts: results.body.insights.topPosts.length
+  },
   localApiMilliseconds: { bootstrap: bootstrap.milliseconds, plan: plan.milliseconds, results: results.milliseconds },
   note: "Container-local timings, not phone/network measurements"
 }, null, 2));

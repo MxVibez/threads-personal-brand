@@ -1048,10 +1048,13 @@ type ResultsDetail =
 
 const emptyThreadsInsights: ThreadsInsightsDto = {
   available: false,
-  periodDays: 7,
+  stale: false,
+  incomplete: false,
+  periodDays: 30,
   totals: {
-    views: 0,
-    followersGained: 0,
+    profileViews: 0,
+    followers: 0,
+    postViews: 0,
     interactions: 0,
     engagementRate: 0
   },
@@ -1147,28 +1150,43 @@ function ResultsScreen({ initData }: { initData: string }) {
     { title: "Опубликовано", value: data.counts.published, detail: "Завершённые публикации. В dry-run реальные посты не создаются." }
   ];
   const insights = data.insights;
-  const maxDailyViews = Math.max(...insights.timeline.map((item) => item.views), 1);
+  const chartTimeline = insights.timeline.slice(-7);
+  const maxDailyViews = Math.max(...chartTimeline.map((item) => item.views), 1);
   const maxThemeViews = Math.max(...insights.themes.map((item) => item.averageViews), 1);
 
   return (
     <section className="screen results-screen">
       <div className="analytics-title-row">
         <div><p className="section-kicker">Ведение аккаунта</p><h1>Аналитика Threads</h1></div>
-        <span className="period-chip">7 дней</span>
+        <span className="period-chip">{insights.periodDays} дней</span>
       </div>
 
       {!data.insights?.available && (
         <div className="analytics-preview-note">
           <span>Threads</span>
-          <div><strong>Аналитика появится после подключения</strong><p>Здесь будут только реальные данные вашего аккаунта — без подставных цифр.</p></div>
+          <div><strong>Аналитика пока недоступна</strong><p>{insights.unavailableReason ?? "Здесь будут только реальные данные вашего аккаунта — без подставных цифр."}</p></div>
+        </div>
+      )}
+
+      {insights.stale && (
+        <div className="analytics-preview-note">
+          <span>Кэш</span>
+          <div><strong>Meta временно не ответила</strong><p>Показываем последние сохранённые данные.</p></div>
+        </div>
+      )}
+
+      {insights.incomplete && (
+        <div className="analytics-preview-note">
+          <span>Meta</span>
+          <div><strong>Часть постов не обновилась</strong><p>Показываем только метрики, которые Meta вернула без ошибки.</p></div>
         </div>
       )}
 
       <article className="reach-hero">
-        <div className="reach-hero-heading"><span>Просмотры</span><small>охват публикаций</small></div>
-        <div className="reach-total"><strong>{formatCompactNumber(insights.totals.views)}</strong><span>за 7 дней</span></div>
-        <div className="reach-bars" aria-label="Просмотры по дням">
-          {insights.timeline.map((item) => (
+        <div className="reach-hero-heading"><span>Просмотры профиля</span><small>реальные данные Threads</small></div>
+        <div className="reach-total"><strong>{formatCompactNumber(insights.totals.profileViews)}</strong><span>за {insights.periodDays} дней</span></div>
+        <div className="reach-bars" aria-label="Просмотры профиля по дням">
+          {chartTimeline.map((item) => (
             <div className="reach-day" key={item.label} aria-label={`${item.label}: ${formatNumber(item.views)} просмотров`}>
               <b>{formatCompactNumber(item.views)}</b>
               <div><span style={{ height: `${Math.max(12, item.views / maxDailyViews * 100)}%` }} /></div>
@@ -1179,8 +1197,8 @@ function ResultsScreen({ initData }: { initData: string }) {
       </article>
 
       <div className="thread-kpis">
-        <div><span>Новые подписчики</span><strong>+{formatNumber(insights.totals.followersGained)}</strong><small>прирост за период</small></div>
-        <div><span>Вовлечение</span><strong>{insights.totals.engagementRate.toFixed(1)}%</strong><small>реакции к просмотрам</small></div>
+        <div><span>Подписчики</span><strong>{formatNumber(insights.totals.followers)}</strong><small>всего сейчас</small></div>
+        <div><span>Вовлечение</span><strong>{insights.totals.engagementRate.toFixed(1)}%</strong><small>реакции к просмотрам постов</small></div>
         <div><span>Взаимодействия</span><strong>{formatCompactNumber(insights.totals.interactions)}</strong><small>лайки, ответы и репосты</small></div>
       </div>
 
@@ -1190,11 +1208,13 @@ function ResultsScreen({ initData }: { initData: string }) {
           <article key={post.id}>
             <span className="thread-rank">{index + 1}</span>
             <div className="top-thread-copy">
-              <p>{post.text}</p>
+              <p><strong>{post.hook}</strong>{post.text !== post.hook ? `\n${post.text}` : ""}</p>
               <div><strong>{formatCompactNumber(post.views)} просмотров</strong><span>{formatNumber(post.likes)} отметок «Нравится» · {formatNumber(post.replies)} ответов</span></div>
+              {post.permalink && <a href={post.permalink} target="_blank" rel="noreferrer">Открыть в Threads</a>}
             </div>
           </article>
         ))}
+        {insights.available && insights.topPosts.length === 0 && <div className="compact-empty"><strong>За период нет публикаций</strong><p>Новые посты появятся здесь после публикации.</p></div>}
       </div>
 
       <div className="results-section-heading"><div><h2>Какие темы заходят</h2><p>Средние просмотры одного поста</p></div></div>
@@ -1209,8 +1229,10 @@ function ResultsScreen({ initData }: { initData: string }) {
 
       <div className="analytics-takeaway">
         <span>@</span>
-        <div><strong>Вывод пока не сформирован</strong><p>Подключите разрешённый источник данных, чтобы сравнивать темы по реальным результатам.</p></div>
+        <div><strong>{insights.takeaway ? "Что сработало" : "Вывод пока не сформирован"}</strong><p>{insights.takeaway ?? "Нужно больше публикаций, чтобы сравнивать темы по реальным результатам."}</p></div>
       </div>
+
+      {insights.updatedAt && <p className="analytics-updated">Обновлено: {formatDateTime(insights.updatedAt)}</p>}
 
       <div className="results-section-heading"><div><h2>Работа пульта</h2><p>Очередь и публикации</p></div></div>
       <div className="analytics-grid">
@@ -1242,6 +1264,17 @@ function formatCompactNumber(value: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function pluralizePosts(value: number): string {
