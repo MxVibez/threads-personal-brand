@@ -7,9 +7,10 @@ if (!actor) throw new Error("APIFY_ACTOR_ID is required");
 const actorApiId = actor.replace("/", "~");
 const input = {
   urls: [
-    "[TOPIC_PRIMARY]",
-    "[TOPIC_AUDIENCE_QUESTION]",
-    "[TOPIC_PAIN_POINT]"
+    "Telegram Mini App для бизнеса",
+    "автоматизация продаж в мессенджере",
+    "AI-аватар для контента",
+    "AI-блогер для бренда"
   ],
   mode: "search",
   maxResults: 50

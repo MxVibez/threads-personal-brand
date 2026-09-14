@@ -6,8 +6,12 @@ describe("ExpertSettingsService", () => {
   it("creates safe defaults for a newly authorized user", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{
       timezone: "Asia/Krasnoyarsk",
-      daily_publication_limit: 5,
-      voice_profile: { description: "", avoid: "", examples: [] }
+      daily_publication_limit: 3,
+      voice_profile: {
+        description: "От первого лица. Прямо, спокойно и конкретно. Объяснять продукт через путь клиента, продажи и реальную работу бизнеса. Короткие абзацы, живые примеры, без давления.",
+        avoid: "Нейрослоп, канцелярит, обещания гарантированного роста, выдуманные кейсы и цифры, перегруз технологиями, агрессивные продажи.",
+        examples: []
+      }
     }] });
     const service = new ExpertSettingsService({ query } as unknown as Pool);
 
@@ -16,8 +20,12 @@ describe("ExpertSettingsService", () => {
       displayName: "Иван"
     })).resolves.toEqual({
       timezone: "Asia/Krasnoyarsk",
-      dailyPublications: 5,
-      voice: { description: "", avoid: "", examples: [] }
+      dailyPublications: 3,
+      voice: {
+        description: "От первого лица. Прямо, спокойно и конкретно. Объяснять продукт через путь клиента, продажи и реальную работу бизнеса. Короткие абзацы, живые примеры, без давления.",
+        avoid: "Нейрослоп, канцелярит, обещания гарантированного роста, выдуманные кейсы и цифры, перегруз технологиями, агрессивные продажи.",
+        examples: []
+      }
     });
   });
 
@@ -54,4 +62,3 @@ describe("ExpertSettingsService", () => {
     expect(sql).not.toContain("avoid");
   });
 });
-

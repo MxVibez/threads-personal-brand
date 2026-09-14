@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            miniapp/package-lock.json
+      - name: Install backend dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Mini App dependencies
+        run: npm --prefix miniapp ci --ignore-scripts
+      - name: Audit tracked files
+        run: sh scripts/audit-repository.sh
+      - name: Verify backend
+        run: npm run typecheck && npm test && npm run build
+      - name: Verify Mini App
+        run: npm --prefix miniapp run typecheck && npm --prefix miniapp test && npm run build:miniapp

@@ -28,8 +28,8 @@ interface ExpertSettingsRow {
 }
 
 const EMPTY_VOICE: ExpertVoiceProfile = {
-  description: "",
-  avoid: "",
+  description: "От первого лица. Прямо, спокойно и конкретно. Объяснять продукт через путь клиента, продажи и реальную работу бизнеса. Короткие абзацы, живые примеры, без давления.",
+  avoid: "Нейрослоп, канцелярит, обещания гарантированного роста, выдуманные кейсы и цифры, перегруз технологиями, агрессивные продажи.",
   examples: []
 };
 
@@ -109,7 +109,7 @@ export class ExpertSettingsService {
     const voice = this.parseVoice(row.voice_profile);
     return {
       timezone,
-      dailyPublications: Math.max(1, Math.min(10, Number(row.daily_publication_limit) || 5)),
+      dailyPublications: Math.max(1, Math.min(10, Number(row.daily_publication_limit) || 3)),
       voice
     };
   }

@@ -35,7 +35,7 @@ describe("PostgreSQL migrations and repositories", () => {
     const loaded = await drafts.listWaitingByExpert("9001");
     expect(loaded).toHaveLength(1);
     expect(loaded[0]).toEqual(first);
-    expect(loaded[0]?.segments).toHaveLength(3);
+    expect(loaded[0]?.segments).toHaveLength(4);
   });
 
   it("does not claim a future job and never republishes a cancelled job", async () => {

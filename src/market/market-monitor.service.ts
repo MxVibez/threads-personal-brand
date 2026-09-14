@@ -4,10 +4,13 @@ import type { Pool, PoolClient } from "pg";
 import { DATABASE_POOL } from "../infrastructure/database/database.tokens";
 
 const SEARCH_TERMS = [
-  "[TOPIC_PRIMARY]",
-  "[TOPIC_AUDIENCE_QUESTION]",
-  "[TOPIC_PAIN_POINT]",
-  "[TOPIC_OBJECTION]"
+  "Telegram Mini App для бизнеса",
+  "приложение для увеличения продаж",
+  "автоматизация продаж в мессенджере",
+  "веб-приложение для эксперта",
+  "мобильное приложение для бизнеса",
+  "AI-аватар для контента",
+  "AI-блогер для бренда"
 ];
 
 const APIFY_REQUEST_TIMEOUT_MS = 20_000;
