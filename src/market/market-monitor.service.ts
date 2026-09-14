@@ -21,16 +21,16 @@ const SEARCH_TERMS = [
 ];
 
 const APIFY_SEARCH_TERMS = [
-  "AI startups",
-  "small business",
-  "creator economy",
-  "customer experience",
-  "founder mistakes",
-  "business automation",
-  "AI avatar",
-  "personal brand",
-  "приложение",
-  "бренд"
+  "Reddit Entrepreneur AI automation",
+  "Reddit small business AI customer service",
+  "Hacker News AI agents startup",
+  "Product Hunt AI agent launch",
+  "YouTube AI startup founder",
+  "Threads AI startups",
+  "LinkedIn founder AI automation",
+  "Reddit creator economy AI",
+  "Reddit customer experience automation",
+  "YouTube personal brand AI avatar"
 ];
 
 const APIFY_REQUEST_TIMEOUT_MS = 20_000;
@@ -111,10 +111,9 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
 
       let datasetId: string | null = null;
       if (apifyConfigured) {
-        const maxResults = this.config.get<number>("APIFY_DAILY_MAX_RESULTS", 50);
-        const maxCharge = this.config.get<number>("APIFY_MAX_CHARGE_USD", 0.2);
+        const maxResults = this.config.get<number>("APIFY_DAILY_MAX_RESULTS", 10);
         const perQueryLimit = Math.max(1, Math.floor(maxResults / APIFY_SEARCH_TERMS.length));
-        const run = await this.startActor(token, actor, perQueryLimit, maxResults, maxCharge);
+        const run = await this.startActor(token, actor, perQueryLimit);
         await this.pool.query(
           `UPDATE market_monitor_runs
            SET apify_run_id = $2, dataset_id = $3
@@ -287,17 +286,12 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   private async startActor(
     token: string,
     actor: string,
-    perQueryLimit: number,
-    totalLimit: number,
-    maxCharge: number
+    perQueryLimit: number
   ): Promise<ApifyRun> {
     const actorId = actor.replace("/", "~");
-    const query = new URLSearchParams({
-      maxItems: String(totalLimit),
-      maxTotalChargeUsd: String(maxCharge)
-    });
+    const query = new URLSearchParams();
     const response = await fetch(
-      `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?${query}`,
+      `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs${query.size ? `?${query}` : ""}`,
       {
         method: "POST",
         headers: {
@@ -305,11 +299,19 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
           "content-type": "application/json"
         },
         body: JSON.stringify({
-          searchQueries: APIFY_SEARCH_TERMS,
-          searchType: "all",
-          maxItems: perQueryLimit,
-          includeReplies: false,
-          postedAfter: new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10),
+          queries: APIFY_SEARCH_TERMS.join("\n"),
+          maxPagesPerQuery: perQueryLimit,
+          resultsPerPage: 10,
+          countryCode: "us",
+          languageCode: "en",
+          quickDateRange: "w1",
+          mobileResults: false,
+          includeUnfilteredResults: false,
+          saveHtml: false,
+          saveHtmlToKeyValueStore: false,
+          includeIcons: false,
+          maximumLeadsEnrichmentRecords: 0,
+          aiOverview: { scrapeFullAiOverview: false },
           proxyConfiguration: { useApifyProxy: true }
         }),
         signal: AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS)
@@ -353,7 +355,39 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     if (!response.ok) throw new Error(`Apify dataset failed: HTTP ${response.status}`);
     const payload = await response.json();
     if (!Array.isArray(payload)) throw new Error("Apify dataset returned an invalid payload");
-    return payload.filter((item): item is MarketItem => Boolean(item) && typeof item === "object" && !Array.isArray(item)).slice(0, limit);
+    const pages = payload.filter((item): item is MarketItem => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+    const flattened: MarketItem[] = [];
+    for (const page of pages) {
+      const rawSearchQuery = page.searchQuery;
+      const pageQuery = this.string(
+        rawSearchQuery && typeof rawSearchQuery === "object" && !Array.isArray(rawSearchQuery)
+          ? (rawSearchQuery as Record<string, unknown>).term
+          : rawSearchQuery ?? page.query
+      );
+      const organicResults = Array.isArray(page.organicResults) ? page.organicResults : [];
+      for (const result of organicResults) {
+        if (!result || typeof result !== "object" || Array.isArray(result)) continue;
+        const entry = result as MarketItem;
+        const sourceUrl = this.string(entry.url ?? entry.link);
+        let sourceName = this.string(entry.displayedUrl ?? entry.displayLink ?? entry.siteName);
+        try {
+          if (!sourceName && sourceUrl) sourceName = new URL(sourceUrl).hostname.replace(/^www\./, "");
+        } catch {
+          sourceName = "";
+        }
+        flattened.push({
+          ...entry,
+          query: pageQuery,
+          text: [this.string(entry.title), this.string(entry.description ?? entry.snippet)]
+            .filter(Boolean)
+            .join("\n"),
+          postUrl: sourceUrl,
+          username: sourceName,
+          scrapedAt: pageQuery ? new Date().toISOString() : undefined
+        });
+      }
+    }
+    return flattened;
   }
 
   private async storeItems(items: MarketItem[]): Promise<void> {
@@ -401,7 +435,7 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
   private async storeItem(client: PoolClient, item: MarketItem): Promise<void> {
     const text = this.string(item.text ?? item.caption ?? item.content).slice(0, MAX_MARKET_TEXT_LENGTH);
     const username = this.string(item.username ?? (item.author as Record<string, unknown> | undefined)?.username).slice(0, 120);
-    const postUrl = this.threadsUrl(item.postUrl ?? item.post_url ?? item.permalink ?? item.url);
+    const postUrl = this.sourceUrl(item.postUrl ?? item.post_url ?? item.permalink ?? item.url);
     if (!text || !username || !postUrl) return;
     const likeCount = this.number(item.likeCount ?? item.like_count ?? item.likes);
     const replyCount = this.number(item.replyCount ?? item.reply_count ?? item.replies);
@@ -484,17 +518,26 @@ export class MarketMonitorService implements OnModuleInit, OnApplicationShutdown
     return typeof value === "string" ? value.replaceAll("\u0000", "").trim() : "";
   }
 
-  private threadsUrl(value: unknown): string {
+  private sourceUrl(value: unknown): string {
     const raw = this.string(value).slice(0, 2_048);
     try {
       const url = new URL(raw);
       const host = url.hostname.toLowerCase();
-      const isThreadsHost =
+      const allowedHost =
         host === "threads.com" ||
         host.endsWith(".threads.com") ||
         host === "threads.net" ||
-        host.endsWith(".threads.net");
-      return url.protocol === "https:" && isThreadsHost ? url.toString() : "";
+        host.endsWith(".threads.net") ||
+        host === "reddit.com" ||
+        host.endsWith(".reddit.com") ||
+        host === "news.ycombinator.com" ||
+        host === "producthunt.com" ||
+        host.endsWith(".producthunt.com") ||
+        host === "youtube.com" ||
+        host.endsWith(".youtube.com") ||
+        host === "linkedin.com" ||
+        host.endsWith(".linkedin.com");
+      return url.protocol === "https:" && allowedHost ? url.toString() : "";
     } catch {
       return "";
     }

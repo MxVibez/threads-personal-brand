@@ -107,7 +107,7 @@ export class ThreadsResultsService {
         },
         {
           id: "apify",
-          name: "Поиск тем в Threads",
+          name: "Зарубежный тренд-радар",
           state: officialMarketConfigured && ["RUNNING", "SUCCEEDED"].includes(marketStatus?.last_status ?? "")
             ? "working"
             : officialMarketConfigured
@@ -135,7 +135,7 @@ export class ThreadsResultsService {
             : apifyConfigured && marketEnabled
             ? `Сохранено ${marketPosts} публикаций от ${marketAccounts} авторов. Найдено ${marketQuestions} публикаций с вопросами.`
             : apifyConfigured
-              ? "API-токен и Actor настроены, но ежедневный сбор выключен."
+              ? "API-токен и Actor настроены, но ежедневный зарубежный сбор выключен."
             : apifyTokenConfigured
               ? "Токен проверен и сохранён. Actor, расписание и сбор данных подключим позже."
               : "Система пока не подключена к Apify и не собирает публичные обсуждения.",

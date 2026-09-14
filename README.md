@@ -39,7 +39,7 @@ docker compose up --build
 
 ## Безопасные значения по умолчанию
 
-- Apify monitoring выключен: `APIFY_MARKET_ENABLED=false`.
+- Зарубежный тренд-радар через Apify включается только на сервере; production использует 10 недельных US SERP-страниц в сутки, а домены проверяются серверным allowlist.
 - Threads publishing работает только в dry-run: `THREADS_DRY_RUN=true`.
 - Все Telegram, Meta Threads, Apify и OpenAI credentials читаются только сервером.
 - Mini App не получает provider tokens и не хранит bearer credentials в browser storage.

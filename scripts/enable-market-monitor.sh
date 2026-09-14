@@ -35,12 +35,11 @@ upsert_env() {
   mv "$threads_tmp" "$env_file"
 }
 
-upsert_env APIFY_ACTOR_ID logical_scrapers/threads-search-scraper
+upsert_env APIFY_ACTOR_ID apify/google-search-scraper
 upsert_env APIFY_MARKET_ENABLED true
-upsert_env APIFY_DAILY_MAX_RESULTS 50
+upsert_env APIFY_DAILY_MAX_RESULTS 10
 upsert_env APIFY_TEST_RUN_LIMIT 9
-upsert_env APIFY_MAX_CHARGE_USD 0.2
 chmod 600 "$env_file"
 
 echo 'Ежедневный мониторинг рынка включён в тестовом режиме.'
-echo 'Лимит: 50 результатов, жёсткий предел $0.20 за запуск.'
+echo 'Лимит: 10 зарубежных поисковых страниц в сутки (по одной на направление).'

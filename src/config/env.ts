@@ -36,7 +36,6 @@ const envSchema = z
     APIFY_MARKET_ENABLED: z.enum(["true", "false"]).default("false"),
     APIFY_DAILY_MAX_RESULTS: z.coerce.number().int().min(10).max(500).default(100),
     APIFY_TEST_RUN_LIMIT: z.coerce.number().int().min(1).max(100).default(9),
-    APIFY_MAX_CHARGE_USD: z.coerce.number().min(0.1).max(5).default(0.5),
     APP_ENCRYPTION_KEY: z.string().default("")
   })
   .superRefine((env, context) => {

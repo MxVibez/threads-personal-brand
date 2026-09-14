@@ -27,6 +27,29 @@ const safeLog = rawLog
   .replace(/apify_api_[A-Za-z0-9_-]+/g, "[REDACTED]")
   .slice(-8_000);
 
+let datasetShape = [];
+if (run.defaultDatasetId) {
+  const datasetResponse = await fetch(
+    `https://api.apify.com/v2/datasets/${run.defaultDatasetId}/items?clean=true&limit=3`,
+    { headers }
+  );
+  if (datasetResponse.ok) {
+    const datasetItems = await datasetResponse.json();
+    datasetShape = Array.isArray(datasetItems)
+      ? datasetItems.map((item) => ({
+          keys: item && typeof item === "object" ? Object.keys(item).slice(0, 40) : [],
+          arrayFields: item && typeof item === "object"
+            ? Object.fromEntries(Object.entries(item)
+                .filter(([, value]) => Array.isArray(value))
+                .map(([key, value]) => [key, value.length]))
+            : {},
+          searchQuery: item?.searchQuery ?? item?.query ?? null,
+          error: item?.error ?? item?.errorDescription ?? null
+        }))
+      : [];
+  }
+}
+
 process.stdout.write(`${JSON.stringify({
   run: {
     id: run.id,
@@ -39,5 +62,6 @@ process.stdout.write(`${JSON.stringify({
     stats: run.stats
   },
   input,
+  datasetShape,
   logTail: safeLog
 }, null, 2)}\n`);

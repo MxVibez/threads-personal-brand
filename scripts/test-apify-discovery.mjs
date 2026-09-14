@@ -10,16 +10,24 @@ if (!actor) throw new Error("APIFY_ACTOR_ID is required");
 
 const actorApiId = actor.replace("/", "~");
 const input = {
-  searchQueries: ["AI startups"],
-  searchType: "all",
-  maxItems: testLimit,
-  includeReplies: false,
-  postedAfter: new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10),
+  queries: "Reddit Entrepreneur AI automation",
+  maxPagesPerQuery: 1,
+  resultsPerPage: 10,
+  countryCode: "us",
+  languageCode: "en",
+  quickDateRange: "w1",
+  mobileResults: false,
+  includeUnfilteredResults: false,
+  saveHtml: false,
+  saveHtmlToKeyValueStore: false,
+  includeIcons: false,
+  maximumLeadsEnrichmentRecords: 0,
+  aiOverview: { scrapeFullAiOverview: false },
   proxyConfiguration: { useApifyProxy: true }
 };
 
 const runResponse = await fetch(
-  `https://api.apify.com/v2/acts/${encodeURIComponent(actorApiId)}/runs?waitForFinish=120&maxItems=${testLimit}&maxTotalChargeUsd=0.05`,
+  `https://api.apify.com/v2/acts/${encodeURIComponent(actorApiId)}/runs?waitForFinish=60`,
   {
     method: "POST",
     headers: {
@@ -31,7 +39,11 @@ const runResponse = await fetch(
 );
 
 if (!runResponse.ok) {
-  throw new Error(`Apify run failed to start: HTTP ${runResponse.status}`);
+  const detail = (await runResponse.text())
+    .replaceAll(token, "[REDACTED]")
+    .replace(/apify_api_[A-Za-z0-9_-]+/g, "[REDACTED]")
+    .slice(0, 2_000);
+  throw new Error(`Apify run failed to start: HTTP ${runResponse.status}: ${detail}`);
 }
 
 let run = (await runResponse.json()).data;
@@ -54,20 +66,25 @@ const itemsResponse = await fetch(
 );
 if (!itemsResponse.ok) throw new Error(`Dataset download failed: HTTP ${itemsResponse.status}`);
 const items = await itemsResponse.json();
-const samples = items.slice(0, 3).map((item) => ({
-  keys: Object.keys(item).slice(0, 30),
-  username: item.username ?? item.author_username ?? item.author?.username ?? null,
-  text: String(item.text ?? item.caption ?? item.content ?? "").slice(0, 240),
-  url: item.url ?? item.post_url ?? item.postUrl ?? null,
-  query: item.searchQuery ?? item.query ?? item.search_keyword ?? null,
-  likes: item.like_count ?? item.likeCount ?? item.likes ?? null,
-  replies: item.reply_count ?? item.replyCount ?? item.replies ?? null
+const results = items.flatMap((page) => Array.isArray(page.organicResults)
+  ? page.organicResults.map((item) => ({
+      ...item,
+      searchQuery: page.searchQuery?.term ?? page.searchQuery ?? page.query
+    }))
+  : []
+).slice(0, testLimit);
+const samples = results.slice(0, 5).map((item) => ({
+  title: String(item.title ?? "").slice(0, 180),
+  description: String(item.description ?? item.snippet ?? "").slice(0, 280),
+  url: item.url ?? item.link ?? null,
+  query: item.searchQuery ?? null
 }));
 
 process.stdout.write(`${JSON.stringify({
   runId: run.id,
   status: run.status,
   datasetId: run.defaultDatasetId,
-  itemCount: items.length,
+  pageCount: items.length,
+  itemCount: results.length,
   samples
 }, null, 2)}\n`);
